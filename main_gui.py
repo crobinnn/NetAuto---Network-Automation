@@ -1,5 +1,5 @@
 import tkinter as tk
-import db_connection as couch
+import db_connection as db
 import os
 import json
 import base64
@@ -7,22 +7,15 @@ import capture_config as cap
 import push_config as push
 import generate_config as gen
 import single_update as single
+import db_view as dbview
 import bulk_update as bulk
+import uat_page as uat
 from tkinter import ttk
 
 header = []
 push_header = []
 cap_header = []
 
-# Global var
-switch_type = ""
-version_name = ""
-hash_value = ""
-firmware = ""
-path = ''
-size = 0
-protocol = ""
-mode = ""
 single_visible = ''
 bulk_visible = ''
 push_visible = ''
@@ -36,17 +29,19 @@ icondata = base64.b64decode(icon)
 
 tempFile= "icon.ico"
 iconfile= open(tempFile,"wb")
-## Extract the icon
+
 iconfile.write(icondata)
 iconfile.close()
 
+# Create main config mode UI function
 def create_config_gui():
   global push_visible, generate_visible, capture_visible
   global conf_frame
   global cap_header
-  push_header = ["No.", "Device IP", "Session","Reload in", "Existing Interface Status", "Backup Existing Config", "Copy New Config", "Push Config", "Verify Interface Status"]
+  push_header = ["No.", "Device IP", "Session","Reload in", "Existing Interface", "Backup Existing", "Copy New Config", "Push Config", "Verify Interface Status","Capture Config"]
   cap_header = ["No.", "Device IP", "Session", "Capture Config"]
   
+  # Creating intially & forget config submodes UI
   push.push_config_gui(push_header,push_frame)
   push_frame.forget()
   gen.generate_config_gui(gen_frame)
@@ -54,6 +49,7 @@ def create_config_gui():
   cap.capture_config_gui(cap_header,capture_frame)
   capture_frame.forget()
 
+  # Switching config submodes UI
   def switch_to_push():
     gen_frame.pack_forget()
     capture_frame.pack_forget()
@@ -79,7 +75,7 @@ def create_config_gui():
     else:
       switch_to_capture()
 
-  select_conf_mode_label = ttk.Label(conf_frame, text='Select modes:')
+  select_conf_mode_label = ttk.Label(conf_frame, text='Select config modes:')
   select_conf_mode_label.grid(row=0, column=0, padx=10, pady=3, sticky=tk.W)
   select_conf_mode_var = tk.StringVar()
   select_conf_mode_dropdown = ttk.Combobox(conf_frame, textvariable=select_conf_mode_var, values=['Push Config', 'Generate Config', 'Capture Config'])
@@ -91,23 +87,26 @@ def create_config_gui():
   generate_visible = False
   capture_visible = False
 
+# Create main update mode UI function
 def create_update_gui():
   global header
   global single_visible,bulk_visible
   global upd_frame
-  upd_frame = tk.Frame(root)
   header = ["No.", "Device IP", "SSH Session", "Old Version","Flash","Copy Image","Verify MD5","Upgrade","Reboot","Reconnect SSH","New Version","Verify Config","Verify Interface","Verify VLAN","Status"]
   
+ # Creating intially & forget update submodes UI
   single.create_single_gui(single_frame)
   single_frame.forget()
   bulk.create_bulk_gui(header,bulk_frame)
   bulk_frame.forget()
 
+  # Switching update submodes UI
   def switch_to_single():
     bulk_frame.pack_forget()
     single_frame.pack()
 
   def switch_to_bulk():
+    bulk.fetch_available_switch_types()
     single_frame.pack_forget()
     bulk_frame.pack()
 
@@ -119,7 +118,7 @@ def create_update_gui():
     elif mode == 'Bulk Update':
       switch_to_bulk()
 
-  select_mode_label = ttk.Label(upd_frame, text='Select modes:')
+  select_mode_label = ttk.Label(upd_frame, text='Select update modes:')
   select_mode_label.grid(row=0, column=0, padx=10, pady=3, sticky=tk.W)
   select_mode_var = tk.StringVar()
   select_mode_dropdown = ttk.Combobox(upd_frame, textvariable=select_mode_var, values=['Single Update', 'Bulk Update'])
@@ -129,7 +128,18 @@ def create_update_gui():
   upd_frame.pack()
   single_visible = False
   bulk_visible = False
+  
+# Work in progress for next mode
+def create_UAT_gui():
+  global uat_frame
+  uat.uat_page_gui(uat_frame)
+  
+  # uat_label = ttk.Label(uat_frame, text='UAT Automation Mode')
+  # uat_label.grid(row=0, column=0, padx=10, pady=3, sticky=tk.W)
+  
+  uat_frame.pack()
 
+# Switching to Update Mode UI function
 def switch_to_update():
   global single_visible,bulk_visible,push_visible,generate_visible,capture_visible
   generate_visible = gen_frame.winfo_ismapped()
@@ -139,19 +149,25 @@ def switch_to_update():
   push_frame.pack_forget()
   capture_frame.pack_forget()
   conf_frame.pack_forget()
+  uat_frame.pack_forget()
+
   upd_frame.pack()
   if single_visible:
     single_frame.pack()
   if bulk_visible:
     bulk_frame.pack()
     
+# Switching to Config Mode UI function
 def switch_to_config():
-  global single_visible,bulk_visible,push_visible,generate_visible
+  global single_visible,bulk_visible,push_visible,generate_visible,capture_visible
   single_visible = single_frame.winfo_ismapped()
   bulk_visible = bulk_frame.winfo_ismapped()
+  
   single_frame.pack_forget()
   bulk_frame.pack_forget()
   upd_frame.pack_forget()
+  uat_frame.pack_forget()
+
   conf_frame.pack()
   if push_visible:
     push_frame.pack()
@@ -160,46 +176,80 @@ def switch_to_config():
   if capture_visible:
     capture_frame.pack()
 
+# Switching to UAT Mode UI function
+def switch_to_UAT():
+  global single_visible,bulk_visible,push_visible,generate_visible,capture_visible
+  single_visible = single_frame.winfo_ismapped()
+  bulk_visible = bulk_frame.winfo_ismapped()
+  generate_visible = gen_frame.winfo_ismapped()
+  push_visible = push_frame.winfo_ismapped()
+  capture_visible = capture_frame.winfo_ismapped()
+  
+  gen_frame.pack_forget()
+  push_frame.pack_forget()
+  capture_frame.pack_forget()
+  single_frame.pack_forget()
+  bulk_frame.pack_forget()
+  upd_frame.pack_forget()
+  conf_frame.pack_forget()
+  
+  uat_frame.pack()
+
 # App window
 root = tk.Tk()
 conf_frame = tk.Frame(root)
 push_frame = tk.Frame(root)
 gen_frame = tk.Frame(root)
 capture_frame = tk.Frame(root)
+upd_frame = tk.Frame(root)
 bulk_frame = tk.Frame(root)
 single_frame = tk.Frame(root)
+uat_frame = tk.Frame(root)
 root.iconbitmap(tempFile)
 os.remove(tempFile)
 root.title('NetAuto version 1')
 root.state('zoomed')
 
-# Maximize the window
+# App Window Fullscreen
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 root.geometry(f"{int(screen_width)}x{int(screen_height)}")
 
-# Variable to keep track of selected GUI
+
 selected_gui = tk.StringVar()
 
 # Set initial value of selected_gui
 selected_gui.set('Update')
 
-# Radio button switch to Update UI
-switch_to_single_radio = ttk.Radiobutton(root, text='Update Mode', variable=selected_gui, value='Update', command=switch_to_update)
-switch_to_single_radio.pack(anchor='nw')
+# Dropdown Menu to switch modes
+select_mode_label = ttk.Label(root, text='Select Mode:')
+select_mode_label.pack(anchor='nw', padx=10, pady=3)
+select_mode_dropdown = ttk.Combobox(root, textvariable=selected_gui, values=['Update', 'Config', 'UAT'])
+select_mode_dropdown.pack(anchor='nw', padx=10, pady=3)
 
-# Radio button switch to Config UI
-switch_to_single_radio = ttk.Radiobutton(root, text='Config Mode', variable=selected_gui, value='Config', command=switch_to_config)
-switch_to_single_radio.pack(anchor='nw')
+def change_mode(event=None):
+  mode = select_mode_dropdown.get()
+  if mode == 'Update':
+    switch_to_update()
+  elif mode == 'Config':
+    switch_to_config()
+  elif mode == 'UAT':
+    switch_to_UAT()
 
-couch.connect_to_db()
+select_mode_dropdown.bind('<<ComboboxSelected>>', change_mode)
 
-# Initialize Config GUI
+popup = db.json_selection()
+root.wait_window(popup)
+
+# Init config UI and forget
 create_config_gui()
 conf_frame.forget()
 
+# init UAT UI and forget
+create_UAT_gui()
+uat_frame.forget()
 
-# Create Update GUI
+# Init Update UI and use it as initial mode to be shown
 create_update_gui()
 
 root.mainloop()

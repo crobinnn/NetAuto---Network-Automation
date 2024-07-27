@@ -4,6 +4,7 @@ from tkinter import ttk,filedialog,font
 from netmiko import ConnectHandler
 import threading
 import csv
+import re
 import datetime
 import time
 
@@ -36,22 +37,20 @@ def capture_config_gui(cap_header,capture_frame):
         return None
   
   def display_cap():
-    # Clear existing data in the Treeview
+    # Clear treeview table
     for item in cap_tree.get_children():
       cap_tree.delete(item)
 
     if loaded_csv:
-      # Create header row
       for i, item in enumerate(cap_header):
         cap_tree.heading("#" + str(i+1), text=item)
         cap_tree.column("#" + str(i+1), stretch=True, width=100)
 
-      # Start SSH process for each bulk
+      # Start SSH
       for index,cap in enumerate(loaded_csv):
         cap['no'] = index + 1
         row_data = [cap['no'], cap['ip'], '','']
         item_id = cap_tree.insert("", "end", values=row_data)
-        # Start SSH process for each bulk
         threading.Thread(target=capture_config, args=(cap, item_id)).start()
   
   def capture_config(cap,item_id):
@@ -97,7 +96,9 @@ def capture_config_gui(cap_header,capture_frame):
       net_connect.find_prompt()
       cap_tree.set(item_id, '#3', "Connected")
       cap_tree.update_idletasks()
+      net_connect.send_command('term length 0')
       
+      # regular case for staging
       hostname = net_connect.send_command('sh run | include hostname').split()[1]
       date_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
       logfilename = f'{hostname}_{date_time}.txt'
@@ -106,13 +107,45 @@ def capture_config_gui(cap_header,capture_frame):
       net_connect.send_command('term length 0')
       hostname = net_connect.send_command('sh run | include hostname').split()[1]
       
+      # Case for device checking, capture need Serial Number as file name
+      # hostname = net_connect.send_command('sh run | include hostname').split()[1]
+      # sn = net_connect.send_command('sh inv | include SN')
+      # def extract_first_serial_number(output):
+      #   """Extract the first serial number from the command output."""
+      #   serial_number_pattern = re.compile(r'SN:\s*(\S+)')
+      #   match = serial_number_pattern.search(output)
+      #   if match:
+      #       return match.group(1)
+      #   else:
+      #       return None
+          
+      # serial = extract_first_serial_number(sn)
+      # logfilename = f'{serial}.txt'
+      # cap_tree.set(item_id, '#4', "Capturing config...")
+      # cap_tree.update_idletasks()
+      # net_connect.send_command('term length 0')
+      # hostname = net_connect.send_command('sh run | include hostname').split()[1]
+
+      
       output = ''
+      
       for cmd in command_list:
         print(f"Sending command: {cmd}")  # Debugging print
-        cmd_output = net_connect.send_command_expect(cmd)
+        cmd_output = net_connect.send_command(cmd, read_timeout=600)
         print(f"Command: {cmd}\nOutput: {cmd_output}")  # Debugging print
         output += f'{hostname}#{cmd}\n{cmd_output}\n\n'
         time.sleep(0.5)
+      
+      # case if sh tech doesnt work
+      # for cmd in command_list:
+      #   print(f"Sending command: {cmd}")  # Debugging print
+      #   if cmd == 'sh tech' or cmd == 'show tech' or cmd == 'show tech-support':
+      #     cmd_output = net_connect.send_command(cmd,read_timeout=600,expect_string='========== END ============')
+      #   else:
+      #     cmd_output = net_connect.send_command(cmd,read_timeout=600)
+      #   print(f"Command: {cmd}\nOutput: {cmd_output}")  # Debugging print
+      #   output += f'{hostname}#{cmd}\n{cmd_output}\n\n'
+      #   time.sleep(0.5)
       
       with open(os.path.join(capture_log_path,logfilename),'w') as log_file:
         log_file.write(output)
@@ -167,7 +200,6 @@ def capture_config_gui(cap_header,capture_frame):
   cap_tree.configure(yscroll=scrollbar.set)
   scrollbar.grid(row=8, column=2, sticky="ns")
 
-  # Configure the grid to expand properly
   capture_frame.grid_rowconfigure(3, weight=1)
   capture_frame.grid_columnconfigure(1, weight=1)
   capture_frame.pack()

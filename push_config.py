@@ -10,6 +10,18 @@ import os
 from openpyxl import Workbook, load_workbook
 
 def push_config_gui(push_header,push_frame):
+  command_list = []
+  
+  def load_cmd():
+    filename = filedialog.askopenfilename(title='Select capture commmand file (.txt)', filetypes=(("TXT files", "*.txt"), ("All files", "*.*")))
+    if filename:
+      cmd_file_var.set(f"{os.path.basename(filename)}")
+      with open(filename, 'r') as file:
+        command_list.clear()
+        for line in file:
+          command_list.append(line.strip())
+        
+        print(command_list)
   
   def load_csv():
     filename = filedialog.askopenfilename(title="Select CSV File", filetypes=(("CSV files", "*.csv"), ("All files", "*.*")))
@@ -55,6 +67,7 @@ def push_config_gui(push_header,push_frame):
     protocol = push['protocol']
     server = push['tftp_ip']
     tftp_address = f'{server}/{filepath}/{file}'
+    capture_log_path = capturelog_entry.get()
     log_path = error_path_entry.get()
     condition = select_condition_var.get()
     bool_reload = reload_var.get()
@@ -151,7 +164,7 @@ def push_config_gui(push_header,push_frame):
         if file in output:
           push_tree.set(item_id, "#7", "Copy Success")
           push_tree.update_idletasks()
-        else:
+        elif file not in output:
           push_tree.set(item_id, "#7", "Copy Fail")
           push_tree.update_idletasks()
           return
@@ -170,9 +183,8 @@ def push_config_gui(push_header,push_frame):
           for line in lines:
               if 'Invalid' in line or '^' in line or 'bytes' in line:
                   continue  # Skip lines containing these error messages
-              error_lines.append(line)  # Add valid error lines to the list
+              error_lines.append(line) 
 
-          # Join all error lines into a single string separated by newlines
           errors = "\n".join(error_lines)
           
           push_tree.set(item_id, "#8", "Write memory...")
@@ -225,31 +237,53 @@ def push_config_gui(push_header,push_frame):
           # Classify lines as added (+) or removed (-)
           for line in intdiff:
             if line.startswith('+'):
-              added_lines.append(line[1:])  # Remove the '+' prefix
+              added_lines.append(line[1:])  
             elif line.startswith('-'):
               removed_lines.append(line[1:])  
 
-          # Add added lines to the output string
           output_string += "Added lines:\n"
           for line in added_lines:
               output_string += f"+ {line}\n"
 
-          # Add a newline to separate sections
           output_string += "\n"
 
-          # Add removed lines to the output string
           output_string += "Removed lines:\n"
           for line in removed_lines:
               output_string += f"- {line}\n"
-          
-          
+           
         else:
           # If no differences, display confirmation message
           push_tree.set(item_id, "#9", "Verified!")
           push_tree.update_idletasks()
           output_string = 'No changes'
         
-        error_file = os.path.join(log_path, error_filename)
+        if capt_var.get() == 'yes':
+          push_tree.set(item_id, "#10", "Capturing...")
+          push_tree.update_idletasks()
+            
+          hostname = net_connect.send_command('sh run | include hostname').split()[1]
+          date_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+          logfilename = f'{hostname}_{date_time}.txt'
+          net_connect.send_command('term length 0')
+          hostname = net_connect.send_command('sh run | include hostname').split()[1]
+              
+          output = ''
+          for cmd in command_list:
+            print(f"Sending command: {cmd}")  # Debugging print
+            cmd_output = net_connect.send_command(cmd,read_timeout=600)
+            print(f"Command: {cmd}\nOutput: {cmd_output}")  # Debugging print
+            output += f'{hostname}#{cmd}\n{cmd_output}\n\n'
+            time.sleep(0.5)
+        
+          with open(os.path.join(capture_log_path,logfilename),'w') as log_file:
+            log_file.write(output)
+          
+          push_tree.set(item_id, "#10", "Done Capturing")
+          push_tree.update_idletasks()
+        
+        else:
+          push_tree.set(item_id, "#10", "Not Capturing")
+          push_tree.update_idletasks()
 
         if not os.path.exists(error_file):
           # Create a new Excel workbook
@@ -332,9 +366,8 @@ def push_config_gui(push_header,push_frame):
           for line in lines:
               if 'Invalid' in line or '^' in line or 'bytes' in line:
                 continue  # Skip lines containing these error messages
-              error_lines.append(line)  # Add valid error lines to the list
+              error_lines.append(line)  
 
-          # Join all error lines into a single string separated by newlines
           errors = "\n".join(error_lines)
           
           push_tree.set(item_id, "#8", "Write memory...")
@@ -388,19 +421,16 @@ def push_config_gui(push_header,push_frame):
           # Classify lines as added (+) or removed (-)
           for line in intdiff:
             if line.startswith('+'):
-              added_lines.append(line[1:])  # Remove the '+' prefix
+              added_lines.append(line[1:])  
             elif line.startswith('-'):
               removed_lines.append(line[1:])  
 
-          # Add added lines to the output string
           output_string += "Added lines:\n"
           for line in added_lines:
               output_string += f"+ {line}\n"
 
-          # Add a newline to separate sections
           output_string += "\n"
 
-          # Add removed lines to the output string
           output_string += "Removed lines:\n"
           for line in removed_lines:
               output_string += f"- {line}\n"
@@ -412,7 +442,33 @@ def push_config_gui(push_header,push_frame):
           push_tree.update_idletasks()
           output_string = 'No changes'
         
-        error_file = os.path.join(log_path, error_filename)
+        if capt_var.get() == 'yes':
+          push_tree.set(item_id, "#10", "Capturing...")
+          push_tree.update_idletasks()
+            
+          hostname = net_connect.send_command('sh run | include hostname').split()[1]
+          date_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+          logfilename = f'{hostname}_{date_time}.txt'
+          net_connect.send_command('term length 0')
+          hostname = net_connect.send_command('sh run | include hostname').split()[1]
+              
+          output = ''
+          for cmd in command_list:
+            print(f"Sending command: {cmd}")  # Debugging print
+            cmd_output = net_connect.send_command(cmd,read_timeout=600)
+            print(f"Command: {cmd}\nOutput: {cmd_output}")  # Debugging print
+            output += f'{hostname}#{cmd}\n{cmd_output}\n\n'
+            time.sleep(0.5)
+        
+          with open(os.path.join(capture_log_path,logfilename),'w') as log_file:
+            log_file.write(output)
+          
+          push_tree.set(item_id, "#10", "Done Capturing")
+          push_tree.update_idletasks()
+        
+        else:
+          push_tree.set(item_id, "#10", "Not Capturing")
+          push_tree.update_idletasks()
 
         if not os.path.exists(error_file):
           # Create a new Excel workbook
@@ -440,42 +496,68 @@ def push_config_gui(push_header,push_frame):
 
         
   style = ttk.Style()
-  style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])  # Remove border from the treeview
+  style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])  
   style.layout("Custom.Treeview.Heading", style.layout("Treeview.Heading"))
 
-  # Custom separator line style
   style.configure("Custom.Treeview", background="#D3D3D3")
   style.map("Custom.Treeview", foreground=[('selected', 'black')])
   
   bold_font = font.Font(family="TkDefaultFont", weight="bold",size=10)
   
   info_label = ttk.Label(push_frame, text='CSV Format = vendor, ip, user, password, protocol (telnet/ssh), tftp_ip, filepath, file', font=bold_font)
-  info_label.grid(row=1, column=0, padx=(0,10), pady=5,columnspan=2)
+  info_label.grid(row=1, column=0, padx=(0,10), pady=5,columnspan=3)
+  
+  capturelog_label = ttk.Label(push_frame, text='Path to Store Capture Logs:')
+  capturelog_label.grid(row=2, column=0,columnspan=3)
+  capturelog_entry = ttk.Entry(push_frame, width=23)
+  capturelog_entry.grid(row=3, column=0,columnspan=3)
   
   # Select condition
   select_condition_label = ttk.Label(push_frame, text='Device Condition')
-  select_condition_label.grid(row=2, column=0,columnspan=2,padx=(0,200))
+  select_condition_label.grid(row=4, column=0,padx=(250,0))
   select_condition_var = tk.StringVar(value='staging')
   select_condition_dropdown = ttk.Combobox(push_frame, textvariable=select_condition_var, values=['existing', 'staging'])
-  select_condition_dropdown.grid(row=3, column=0,columnspan=2,padx=(0,200))
+  select_condition_dropdown.grid(row=5, column=0,padx=(250,0))
 
   error_path_label = ttk.Label(push_frame, text='Push Config Log Path:')
-  error_path_label.grid(row=4, column=0,columnspan=2,padx=(0,200))
+  error_path_label.grid(row=6, column=0,padx=(250,0))
   error_path_entry = ttk.Entry(push_frame, width=23)
-  error_path_entry.grid(row=5, column=0,columnspan=2,padx=(0,200))
+  error_path_entry.grid(row=7, column=0,padx=(250,0),pady=(0,10))
   
+  # Use capture dropdown
+  capt_label = ttk.Label(push_frame, text='Use capture config:')
+  capt_label.grid(row=4, column=1)
+  capt_var = tk.StringVar(value='no')
+  capt_dropdown = ttk.Combobox(push_frame, textvariable=capt_var, values=['yes', 'no'])
+  capt_dropdown.grid(row=5, column=1)
+
+  cmd_file_var = tk.StringVar(value='Import')
+  # capture file select
+  capt_file_label = ttk.Label(push_frame, text='Select capture file:')
+  capt_file_label.grid(row=6, column=1)
+  open_txt_button = ttk.Button(push_frame, textvariable=cmd_file_var, command=load_cmd,state='disabled')
+  open_txt_button.grid(row=7, column=1,pady=(0,10))
+
+  # Enable/disable capture based on dropdown selection
+  def on_capt_change(event):
+    if capt_var.get() == 'yes':
+      open_txt_button.config(state='normal')
+    else:
+      open_txt_button.config(state='disabled')
+
+  capt_dropdown.bind('<<ComboboxSelected>>', on_capt_change)
   # Use reload dropdown
   reload_label = ttk.Label(push_frame, text='Use Reload:')
-  reload_label.grid(row=2, column=1,padx=(200,0))
+  reload_label.grid(row=4, column=2,columnspan=1,padx=(0,250))
   reload_var = tk.StringVar(value='no')
   reload_dropdown = ttk.Combobox(push_frame, textvariable=reload_var, values=['yes', 'no'])
-  reload_dropdown.grid(row=3, column=1,padx=(200,0))
+  reload_dropdown.grid(row=5, column=2,columnspan=1,padx=(0,250))
 
   # Reload time entry
   reload_time_label = ttk.Label(push_frame, text='Reload Time (minutes):')
-  reload_time_label.grid(row=4, column=1,padx=(200,0))
+  reload_time_label.grid(row=6, column=2,columnspan=1,padx=(0,250))
   reload_entry = ttk.Entry(push_frame, width=23, state='disabled')
-  reload_entry.grid(row=5, column=1,padx=(200,0))
+  reload_entry.grid(row=7, column=2,columnspan=1,padx=(0,250),pady=(0,10))
 
   # Enable/disable reload time entry based on dropdown selection
   def on_reload_change(event):
@@ -488,20 +570,19 @@ def push_config_gui(push_header,push_frame):
 
   # Button to open file explorer
   open_button = ttk.Button(push_frame, text="Import CSV & Start", command=display_push)
-  open_button.grid(row=10, column=0, padx=10,pady=5,columnspan=2)
+  open_button.grid(row=10, column=0, padx=10,pady=5,columnspan=3)
 
   push_tree = ttk.Treeview(push_frame, columns=[f"#{i}" for i in range(1, len(push_header) + 1)], show="headings", height=25, style="Custom.Treeview")
-  push_tree.grid(row=11, column=0, sticky="nsew",columnspan=2)
+  push_tree.grid(row=11, column=0, sticky="nsew",columnspan=3)
   for i, col in enumerate(push_header):
     push_tree.heading(f"#{i+1}", text=col)
-    push_tree.column(f"#{i+1}", width=150, stretch=tk.YES)
+    push_tree.column(f"#{i+1}", width=100, stretch=tk.YES)
 
   # Add scrollbar to the Treeview
   scrollbar = ttk.Scrollbar(push_frame, orient="vertical", command=push_tree.yview)
   push_tree.configure(yscroll=scrollbar.set)
-  scrollbar.grid(row=11, column=3, sticky="ns")
+  scrollbar.grid(row=11, column=4, sticky="ns")
 
-  # Configure the grid to expand properly
   push_frame.grid_rowconfigure(3, weight=1)
   push_frame.grid_columnconfigure(1, weight=1)
   push_frame.pack()

@@ -1,11 +1,11 @@
 import tkinter as tk
-from tkinter import ttk,filedialog
+from tkinter import ttk, filedialog, messagebox
 import os
 import re
 import csv
 
 def generate_config_gui(gen_frame):
-  
+
   # Variables to store file paths
   template_file_path = ""
   csv_file_path = ""
@@ -39,28 +39,34 @@ def generate_config_gui(gen_frame):
 
   def validate_parameters(template_file, csv_file):
     with open(template_file, 'r') as f:
-        template = f.read()
+      template = f.read()
 
-    # Extract keys from template
     keys_with_braces = re.findall(r'{(.*?)}', template)
 
     with open(csv_file, 'r') as csvfile:
-        reader = csv.DictReader(csvfile)
-        csv_headers = reader.fieldnames
+      reader = csv.DictReader(csvfile)
+      csv_headers = reader.fieldnames
+      
+      # Check for the presence of 'hostname' in both template and CSV
+      if 'hostname' not in keys_with_braces:
+        tk.messagebox.showerror("Parameter Mismatch", "'hostname' parameter is required but missing")
+        return False
 
-        # Find missing keys in CSV
-        missing_in_csv = [key for key in keys_with_braces if key not in csv_headers]
-        # Find missing keys in Template
-        missing_in_template = [key for key in csv_headers if key not in keys_with_braces]
+      if 'hostname' not in csv_headers:
+        tk.messagebox.showerror("Parameter Mismatch", "'hostname' parameter is required but missing")
+        return False
 
-        if missing_in_csv or missing_in_template:
-            error_message = "Parameter mismatch found:\n"
-            if missing_in_csv:
-                error_message += f"Missing in CSV: {', '.join(missing_in_csv)}\n"
-            if missing_in_template:
-                error_message += f"Missing in Template: {', '.join(missing_in_template)}\n"
-            tk.messagebox.showerror("Parameter Mismatch", error_message)
-            return False
+      missing_in_csv = [key for key in keys_with_braces if key not in csv_headers]
+      missing_in_template = [key for key in csv_headers if key not in keys_with_braces]
+
+      if missing_in_csv or missing_in_template:
+        error_message = "Parameter mismatch found:\n"
+        if missing_in_csv:
+          error_message += f"Missing in CSV: {', '.join(missing_in_csv)}\n"
+        if missing_in_template:
+          error_message += f"Missing in Template: {', '.join(missing_in_template)}\n"
+        tk.messagebox.showerror("Parameter Mismatch", error_message)
+        return False
 
     return True
 
@@ -68,30 +74,44 @@ def generate_config_gui(gen_frame):
     with open(template_file, 'r') as f:
       template = f.read()
 
-    # Extract keys from template
     keys_with_braces = re.findall(r'{(.*?)}', template)
 
     with open(csv_file, 'r') as csvfile:
       reader = csv.DictReader(csvfile)
       for row in reader:
-        config = template  # Start with the original template
+        config_lines = template.splitlines()
+        processed_lines = []
+        skip_lines = False
 
-        # Replace placeholders with values from CSV row
-        for key_with_braces in keys_with_braces:
-          placeholder = f'{{{key_with_braces}}}'
-          key = key_with_braces  # Do not strip braces this time
-          if key in row:
-            value = row[key].strip('"')  # Remove double quotes
-            config = config.replace(placeholder, value)
+        for line in config_lines:
+          if skip_lines:
+            if line.strip() == "":
+              skip_lines = False
+            continue
 
-        # Remove braces from generated config (outside the loop)
-        config = config.replace('{', '').replace('}', '')
+          # Check if line contains a placeholder with an empty value
+          line_contains_empty_placeholder = False
+          for key_with_braces in keys_with_braces:
+            placeholder = f'{{{key_with_braces}}}'
+            if placeholder in line and key_with_braces in row and row[key_with_braces] == "":
+              skip_lines = True
+              line_contains_empty_placeholder = True
+              break
 
+          if not line_contains_empty_placeholder:
+            for key_with_braces in keys_with_braces:
+              placeholder = f'{{{key_with_braces}}}'
+              if key_with_braces in row:
+                value = row[key_with_braces].strip('"')
+                line = line.replace(placeholder, value)
+
+            processed_lines.append(line)
+
+        config = "\n".join(processed_lines)
         output_file_path = os.path.join(output_dir, f"{row['hostname']}_config.txt")
         with open(output_file_path, 'w') as outfile:
           outfile.write(config)
 
-  # GUI Elements
   template_label = ttk.Label(gen_frame, text="Template File: Not Selected")
   template_label.grid(row=0, column=0, padx=10, pady=5)
 
@@ -112,4 +132,3 @@ def generate_config_gui(gen_frame):
 
   generate_button = ttk.Button(gen_frame, text="Generate Configurations", command=generate_config)
   generate_button.grid(row=3, columnspan=2, padx=10, pady=10)
-

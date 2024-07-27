@@ -1,42 +1,48 @@
 
 import tkinter as tk
-import db_connection as couch
-import couchdb
+import db_connection as db
 import csv
 import re
 import os
 import threading
 import time
 import difflib
-from netmiko import ConnectHandler
+from netmiko import ConnectHandler, NetmikoAuthenticationException, NetmikoTimeoutException
 from tkinter import ttk,messagebox,filedialog,font
 
 def create_bulk_gui(header,bulk_frame):
-
+  global fetch_available_switch_types
+  json_data = db.json_data
+  file_path = db.file_path
   def fetch_available_switch_types(event=None):
-    if not couch.db_connection:
-        messagebox.showinfo('Error Occured', 'Cannot access database. Not connected.')
-        return
+    if json_data is None:
+      messagebox.showinfo('Error Occured', 'Cannot access database. JSON not loaded.')
+      return
     try:
-      all_docs = couch.db.view('_all_docs')
-      switch_types = [row.id for row in all_docs]
+      switch_types = list(json_data.get("UpdateDB", {}).keys())
       available_ver_dropdown['values'] = switch_types
-    except couchdb.http.ResourceNotFound:
-      version_text.insert(tk.END,"Database not found")
+    except Exception as e:
+      version_text.insert(tk.END,f"Failed Fetching SW types. {e}")
+      
   
   def fetch_versions(event=None):
     switch_type = available_ver_var.get()
-    if not couch.db_connection:
-        messagebox.showinfo('Error Occured', 'Cannot access database. Not connected.')
-        return
+    if json_data is None:
+      messagebox.showinfo('Error Occured', 'Cannot access database. JSON not loaded.')
+      return
     try:
-      data = couch.db[switch_type]
-      versions = [f"> {version['name']}\n" for version in data["versions"]]
+      switch_data = json_data.get("UpdateDB", {}).get(switch_type, {})
+      versions = [version["name"] for version in switch_data.get("versions", [])]
       version_text.delete(1.0, tk.END)  # Clear previous content
       version_text.insert(tk.END, 'Available Versions:\n')
-      version_text.insert(tk.END, ''.join(versions))
-    except couchdb.http.ResourceNotFound:
-      version_text.insert(tk.END,"Document not found in CouchDB")
+      if versions:
+        # Format versions with bullet points
+        for version in versions:
+          version_text.insert(tk.END, f'> {version}\n')
+      else:
+        version_text.insert(tk.END, 'No versions available.')
+    except Exception as e:
+      version_text.insert(tk.END,"Failed fetching version")
 
   def load_csv():
     filename = filedialog.askopenfilename(title="Select CSV File", filetypes=(("CSV files", "*.csv"), ("All files", "*.*")))
@@ -79,7 +85,7 @@ def create_bulk_gui(header,bulk_frame):
     protocol = bulk['protocol']
     tftp_server = bulk['serverip']
     save_path = path_entry.get()
-    doc = couch.db.get(switch_type)
+    doc = db.db.get(switch_type)
 
     if doc:
       found_version = False
@@ -87,7 +93,7 @@ def create_bulk_gui(header,bulk_frame):
         if version['name'] == os_version:
           firmware = version['firmware']
           hash_value = version['hash']
-          size = version['size']
+          size = int(version['size'])
           path = version['path']
           found_version = True
           break
@@ -99,7 +105,7 @@ def create_bulk_gui(header,bulk_frame):
         messagebox.showinfo("Information", f"Switch type '{switch_type}' not found in the database.")
         return
 
-    # Construct cisco_device dictionary based on switch type
+    # SSH Parameter
     if switch_type == 'C2960':
       cisco_device = {
         'device_type': 'cisco_ios',
@@ -131,17 +137,20 @@ def create_bulk_gui(header,bulk_frame):
       bulk_tree.update_idletasks()
       return
     else:
-      device_prompt = net_connect.find_prompt()
-      bulk_tree.set(item_id, "#3", "Connected")
-      bulk_tree.update_idletasks()
+      isenable = net_connect.check_enable_mode()
+      if isenable == False:
+        net_connect.enable()
+      else:
+        device_prompt = net_connect.find_prompt()
+        bulk_tree.set(item_id, "#3", "Connected")
+        bulk_tree.update_idletasks()
 
       if switch_type == 'C2960':
-        # Before update Version
         shcurrentver = net_connect.send_command('show ver', read_timeout=300)
         firstline = shcurrentver.strip().split('\n')[0]
         version_index = firstline.find("Version")
 
-        # Get the substring starting from "Version" up to the next comma
+        # Get version 
         if version_index != -1:
           comma_index = firstline.find(",", version_index)
           if comma_index != -1:
@@ -161,7 +170,7 @@ def create_bulk_gui(header,bulk_frame):
         currentvlan = net_connect.send_command('show vlan', read_timeout=300)
 
         output = net_connect.send_command('dir flash:')
-        bytes_free_pattern = r'(\d+) bytes free'
+        bytes_free_pattern = r'\((\d+) bytes free\)'
         matches = re.search(bytes_free_pattern, output)
 
         if matches:
@@ -182,7 +191,6 @@ def create_bulk_gui(header,bulk_frame):
               output = net_connect.send_command('\n', expect_string='Accessing ' + protocol + '://', read_timeout=100)
             
               while True:
-                # Capture the output incrementally
                 output_part = net_connect.read_channel()
                 
                 if output_part:
@@ -192,7 +200,6 @@ def create_bulk_gui(header,bulk_frame):
                 if device_prompt in output_part:
                   break
 
-                # Sleep to avoid overwhelming the device with continuous reads
                 time.sleep(3)
 
               output = net_connect.send_command_timing('dir flash:*.bin', delay_factor=4, max_loops=1000)
@@ -220,7 +227,6 @@ def create_bulk_gui(header,bulk_frame):
                   if device_prompt in output_part:
                     break
 
-                  # Sleep to avoid overwhelming the device with continuous reads
                   time.sleep(3)
 
                 if verified == True:
@@ -257,7 +263,7 @@ def create_bulk_gui(header,bulk_frame):
                           firstline = shupdatever.strip().split('\n')[0]
                           version_index = firstline.find("Version")
 
-                          # Get the substring starting from "Version" up to the next comma
+                          # Get version after upd
                           if version_index != -1:
                             comma_index = firstline.find(",", version_index)
                             if comma_index != -1:
@@ -288,15 +294,13 @@ def create_bulk_gui(header,bulk_frame):
                               # Classify lines as added (+) or removed (-)
                               for line in confdiff:
                                 if line.startswith('+'):
-                                  added_lines.append(line[1:])  # Remove the '+' prefix
+                                  added_lines.append(line[1:])  
                                 elif line.startswith('-'):
-                                  removed_lines.append(line[1:])  # Remove the '-' prefix
-                              
-                              # Update bulk_tree and possibly display in GUI
+                                  removed_lines.append(line[1:])  
+
                               bulk_tree.set(item_id, "#12", "Not Match")
                               bulk_tree.update_idletasks()
-                              
-                              # Write to a human-readable file
+
                               conf_filename = f"{switch_type}_{ip}_conf.txt"
                               with open(os.path.join(save_path, conf_filename), 'w') as f:
                                 f.write("Added lines:\n")
@@ -327,15 +331,13 @@ def create_bulk_gui(header,bulk_frame):
                               # Classify lines as added (+) or removed (-)
                               for line in intdiff:
                                 if line.startswith('+'):
-                                  added_lines.append(line[1:])  # Remove the '+' prefix
+                                  added_lines.append(line[1:])  
                                 elif line.startswith('-'):
-                                  removed_lines.append(line[1:])  # Remove the '-' prefix
-                              
-                              # Update bulk_tree and possibly display in GUI
+                                  removed_lines.append(line[1:])  
+
                               bulk_tree.set(item_id, "#13", "Not Match")
                               bulk_tree.update_idletasks()
-                              
-                              # Write to a human-readable file
+
                               int_filename = f"{switch_type}_{ip}_int.txt"
                               with open(os.path.join(save_path, int_filename), 'w') as f:
                                 f.write("Added lines:\n")
@@ -367,15 +369,13 @@ def create_bulk_gui(header,bulk_frame):
                               # Classify lines as added (+) or removed (-)
                               for line in vlandiff:
                                 if line.startswith('+'):
-                                  added_lines.append(line[1:])  # Remove the '+' prefix
+                                  added_lines.append(line[1:]) 
                                 elif line.startswith('-'):
-                                  removed_lines.append(line[1:])  # Remove the '-' prefix
-                              
-                              # Update bulk_tree and possibly display in GUI
+                                  removed_lines.append(line[1:])  
+
                               bulk_tree.set(item_id, "#14", "Not Match")
                               bulk_tree.update_idletasks()
-                              
-                              # Write to a human-readable file
+
                               vlan_filename = f"{switch_type}_{ip}_vlan.txt"
                               with open(os.path.join(save_path, vlan_filename), 'w') as f:
                                 f.write("Added lines:\n")
@@ -398,7 +398,12 @@ def create_bulk_gui(header,bulk_frame):
                             bulk_tree.set(item_id, "#11", "Not Updated")
                             bulk_tree.update_idletasks()
                             net_connect.disconnect()
-
+                            
+                    except (NetmikoTimeoutException, NetmikoAuthenticationException) as e:
+                      bulk_tree.set(item_id, "#10", "Reconnecting..")
+                      bulk_tree.update_idletasks()
+                      time.sleep(3)
+                      
                     except Exception as e:
                       bulk_tree.set(item_id, "#10", "Reconnecting..")
                       bulk_tree.update_idletasks()
@@ -409,7 +414,7 @@ def create_bulk_gui(header,bulk_frame):
                   net_connect.disconnect()
               
               else:
-                choice = messagebox.askquestion('Process No. ' + number + ' IP: ' + ip, 'Failed to copy file. Do you want to try again?')
+                choice = messagebox.askquestion('Process No. ' + str(number) + ' IP: ' + ip, 'Failed to copy file. Do you want to try again?')
                 bulk_tree.set(item_id, "#6", "Fail")
                 bulk_tree.update_idletasks()
                 if choice.lower() != 'yes':
@@ -433,7 +438,7 @@ def create_bulk_gui(header,bulk_frame):
         firstline = shcurrentver.strip().split('\n')[1]
         version_index = firstline.find("Version")
 
-        # Get the substring starting from "Version" up to the next comma
+        # Get version
         if version_index != -1:
           comma_index = firstline.find(",", version_index)
           if comma_index != -1:
@@ -453,7 +458,7 @@ def create_bulk_gui(header,bulk_frame):
         currentvlan = net_connect.send_command('show vlan', read_timeout=300)
 
         output = net_connect.send_command('dir flash:')
-        bytes_free_pattern = r'(\d+) bytes free'
+        bytes_free_pattern = r'\((\d+) bytes free\)'
         matches = re.search(bytes_free_pattern, output)
 
         if matches:
@@ -462,299 +467,23 @@ def create_bulk_gui(header,bulk_frame):
             bulk_tree.set(item_id, "#5", "Available")
             bulk_tree.update_idletasks()
 
-            while True:
-              device_prompt = net_connect.find_prompt()
-              # Copy firmware
-              if protocol == 'tftp':
-                output = net_connect.send_command_timing('copy ' + protocol + '://' + tftp_server + '/' + path + ' flash:', read_timeout=100)
-                  
-              else:
-                output = net_connect.send_command_timing('copy ' + protocol + '://' + 'compnet:C0mpn3t!@' + tftp_server + '/' + path + ' flash:', read_timeout=100)
-                  
-              # confirmation prompt enter empty string biar enter
-              output = net_connect.send_command('\n', expect_string='Accessing ' + protocol + '://', read_timeout=100)
-            
-              while True:
-                # Capture the output incrementally
-                output_part = net_connect.read_channel()
-                
-                if output_part:
-                  bulk_tree.set(item_id, "#6", "Copying..")
-                  bulk_tree.update_idletasks()
-              
-                if device_prompt in output_part:
-                  break
-
-                # Sleep to avoid overwhelming the device with continuous reads
-                time.sleep(3)
-
-              output = net_connect.send_command_timing('dir flash:*.bin', delay_factor=4, max_loops=1000)
-
-              # confirm apakah file udh ad di flash or not, kalau ad kita ganti system boot ke firmware yg ud dicopy
-              if firmware in output:
-                bulk_tree.set(item_id, "#6", "Success")
-                bulk_tree.update_idletasks()
-                #Verify MD5
-                output = net_connect.send_command('verify /md5 flash:' + firmware + ' ' + hash_value ,expect_string='...')
-
-                verified = False
-
-                while True:
-                  output_part = net_connect.read_channel()
-              
-                  if output_part:
-                    bulk_tree.set(item_id, "#7", "Verifying..")
-                    bulk_tree.update_idletasks()
-                  
-                  if 'Verified' in output_part:
-                    verified = True
-                    break
-
-                  if device_prompt in output_part:
-                    break
-
-                  # Sleep to avoid overwhelming the device with continuous reads
-                  time.sleep(3)
-
-                if verified == True:
-                  # Upgrade firmware
-                  bulk_tree.set(item_id, "#7", "Success")
-                  bulk_tree.update_idletasks()
-
-                  bulk_tree.set(item_id, "#8", "Upgrading..")
-                  bulk_tree.update_idletasks()
-                  output = net_connect.send_config_set('no boot system')
-
-                  output = net_connect.send_config_set('boot system flash:packages.conf')
-
-                  output = net_connect.send_config_set('no boot manual')
-
-                  output = net_connect.send_command_timing('write memory', delay_factor=4, max_loops=1000)
-
-                  output = net_connect.send_command('install add file flash:' + firmware + ' activate commit',expect_string='install_add_activate_commit:')
-                  
-                  while True:
-                    # Capture the output incrementally
-                    output_part = net_connect.read_channel()
-                    if output_part:
-                      bulk_tree.set(item_id, "#8", "Install add..")
-                      bulk_tree.update_idletasks()
-            
-                    if "[y/n]" in output_part:
-                      output += net_connect.send_command_timing("y", strip_prompt=False, strip_command=False)
-
-                    # Check for the expected prompt to know the command is complete
-                    if device_prompt in output_part:
-                      break
-
-                    # Sleep to avoid overwhelming the device with continuous reads
-                    time.sleep(3)
-
-                  bulk_tree.set(item_id, "#8", "Done")
-                  bulk_tree.update_idletasks()
-                  net_connect.disconnect()
-                  bulk_tree.set(item_id, "#9", "Rebooting..")
-                  bulk_tree.set(item_id, "#10", "Reconnecting..")
-                  bulk_tree.update_idletasks()
-
-                  reconnected = False
-                  while not reconnected:
-                    try:
-                      with ConnectHandler(**cisco_device) as net_connect:
-                        # REconnect SSH
-                        bulk_tree.set(item_id, "#9", "UP")
-                        bulk_tree.set(item_id, "#10", "Reconnected")
-                        bulk_tree.update_idletasks()
-                        reconnected = True
-
-                        # Update ver
-                        shupdatever = net_connect.send_command_timing('show ver', delay_factor=4, max_loops=1000)
-                        firstline = shupdatever.strip().split('\n')[1]
-                        version_index = firstline.find("Version")
-
-                        # Get the substring starting from "Version" up to the next comma
-                        if version_index != -1:
-                          comma_index = firstline.find(",", version_index)
-                          if comma_index != -1:
-                            updatever = firstline[version_index + len("Version"):comma_index]
-                          else:
-                            updatever = 'Not Found'
-                        else:
-                          updatever = 'Not Found'
-                            
-                        bulk_tree.set(item_id, "#11", updatever)
-                        bulk_tree.update_idletasks()
-
-                        if updatever != currentver:
-                          #config verify
-                          bulk_tree.set(item_id, "#12", "Verifying..")
-                          bulk_tree.update_idletasks()
-
-                          updateconfig = net_connect.send_command('show run', read_timeout=300)
-                          
-                          updateconf_lines = updateconfig.strip().split('\n')
-                          currentconf_lines = currentconfig.strip().split('\n')
-
-                          confdiff = difflib.unified_diff(currentconf_lines, updateconf_lines)
-                          # Check if there are differences
-                          if any(confdiff):
-                            added_lines =[]
-                            removed_lines = []
-                            # Classify lines as added (+) or removed (-)
-                            for line in confdiff:
-                              if line.startswith('+'):
-                                added_lines.append(line[1:])  # Remove the '+' prefix
-                              elif line.startswith('-'):
-                                removed_lines.append(line[1:])  # Remove the '-' prefix
-                            
-                            # Update bulk_tree and possibly display in GUI
-                            bulk_tree.set(item_id, "#12", "Not Match")
-                            bulk_tree.update_idletasks()
-                            
-                            # Write to a human-readable file
-                            conf_filename = f"{switch_type}_{ip}_conf.txt"
-                            with open(os.path.join(save_path, conf_filename), 'w') as f:
-                              f.write("Added lines:\n")
-                              for line in added_lines:
-                                f.write(f"+ {line}\n")
-                              
-                              f.write("\nRemoved lines:\n")
-                              for line in removed_lines:
-                                f.write(f"- {line}\n")
-                                
-                          else:
-                            # If no differences, display confirmation message
-                            bulk_tree.set(item_id, "#12", "Match")
-                            bulk_tree.update_idletasks()
-                
-                          bulk_tree.set(item_id, "#13", "Verifying..")
-                          bulk_tree.update_idletasks()
-
-                          updateint = net_connect.send_command('show ip int br', read_timeout=300)
-                          updateint_lines = updateint.strip().split('\n')
-                          currentint_lines = currentint.strip().split('\n')
-                          
-                          intdiff = difflib.unified_diff(currentint_lines, updateint_lines)
-                          # Check if there are differences
-                          if any(intdiff):
-                            added_lines =[]
-                            removed_lines = []
-                            # Classify lines as added (+) or removed (-)
-                            for line in intdiff:
-                              if line.startswith('+'):
-                                added_lines.append(line[1:])  # Remove the '+' prefix
-                              elif line.startswith('-'):
-                                removed_lines.append(line[1:])  # Remove the '-' prefix
-                            
-                            # Update bulk_tree and possibly display in GUI
-                            bulk_tree.set(item_id, "#13", "Not Match")
-                            bulk_tree.update_idletasks()
-                            
-                            # Write to a human-readable file
-                            int_filename = f"{switch_type}_{ip}_int.txt"
-                            with open(os.path.join(save_path, int_filename), 'w') as f:
-                              f.write("Added lines:\n")
-                              for line in added_lines:
-                                f.write(f"+ {line}\n")
-                              
-                              f.write("\nRemoved lines:\n")
-                              for line in removed_lines:
-                                f.write(f"- {line}\n")      
-                          else:
-                            # If no differences, display confirmation message
-                            bulk_tree.set(item_id, "#13", "Match")
-                            bulk_tree.update_idletasks()
-                              
-                          bulk_tree.set(item_id, "#14", "Verifying..")
-                          bulk_tree.update_idletasks()
-
-                          updatevlan = net_connect.send_command('show vlan', read_timeout=300)
-                          net_connect.disconnect()
-                          updatevlan_lines = updatevlan.strip().split('\n')
-                          currentvlan_lines = currentvlan.strip().split('\n')
-
-                          vlandiff = difflib.unified_diff(updatevlan_lines, currentvlan_lines)
-
-                          # Check if there are differences
-                          if any(vlandiff):
-                            added_lines =[]
-                            removed_lines = []
-                            # Classify lines as added (+) or removed (-)
-                            for line in vlandiff:
-                              if line.startswith('+'):
-                                added_lines.append(line[1:])  # Remove the '+' prefix
-                              elif line.startswith('-'):
-                                removed_lines.append(line[1:])  # Remove the '-' prefix
-                            
-                            # Update bulk_tree and possibly display in GUI
-                            bulk_tree.set(item_id, "#14", "Not Match")
-                            bulk_tree.update_idletasks()
-                            
-                            # Write to a human-readable file
-                            vlan_filename = f"{switch_type}_{ip}_vlan.txt"
-                            with open(os.path.join(save_path, vlan_filename), 'w') as f:
-                              f.write("Added lines:\n")
-                              for line in added_lines:
-                                f.write(f"+ {line}\n")
-                              
-                              f.write("\nRemoved lines:\n")
-                              for line in removed_lines:
-                                f.write(f"- {line}\n")
-                          else:
-                            # If no differences, display confirmation message
-                            bulk_tree.set(item_id, "#14", "Match")
-                            bulk_tree.update_idletasks()
-                              
-                          bulk_tree.set(item_id, "#15", "Done!")
-                          bulk_tree.update_idletasks()
-                          time.sleep(3)
-
-                        else:
-                          bulk_tree.set(item_id, "#11", "Not Updated")
-                          bulk_tree.update_idletasks()
-                          net_connect.disconnect()
-
-                    except Exception as e:
-                      bulk_tree.set(item_id, "#10", "Reconnecting..")
-                      bulk_tree.update_idletasks()
-                      time.sleep(3)
-                      
-                else:
-                  bulk_tree.set(item_id, "#7", "Fail")
-                  bulk_tree.update_idletasks()
-                  net_connect.disconnect()
-            
-              else:
-                choice = messagebox.askquestion('Process No. ' + number + ' IP: ' + ip, 'Failed to copy file. Do you want to try again?')
-                bulk_tree.set(item_id, "#6", "Fail")
-                bulk_tree.update_idletasks()
-                if choice.lower() != 'yes':
-                  return
-                else:
-                  # Continue to the beginning of the outer while loop for retry
-                  continue
-                        
           elif free_bytes < size:
             bulk_tree.set(item_id, "#5", "Not Available")
             bulk_tree.update_idletasks()
             output = net_connect.send_command('install remove inactive',expect_string='install_remove:')
 
             while True:
-              # Capture the output incrementally
               output_part = net_connect.read_channel()
               if output_part:
                 bulk_tree.set(item_id, "#5", "Cleaning Flash..")
                 bulk_tree.update_idletasks()
-              
-              # This part handles the real-time printing of ongoing process like !!!!
+
               if '[y/n]' in output_part:
                 output += net_connect.send_command_timing("y")
-                  
-              # Check for the expected prompt to know the command is complete
+
               if device_prompt in output_part:
                 break
 
-              # Sleep to avoid overwhelming the device with continuous reads
               time.sleep(3)
 
             bulk_tree.set(item_id, "#5", "Cleaned Up!")
@@ -763,14 +492,287 @@ def create_bulk_gui(header,bulk_frame):
             bulk_tree.set(item_id, "#5", "Run Again Later")
             bulk_tree.update_idletasks()
             net_connect.disconnect()
+            return
             
         else:
           bulk_tree.set(item_id, "#5", "ERR")
           bulk_tree.update_idletasks()
           net_connect.disconnect()
+          return
+          
+        while True:
+          device_prompt = net_connect.find_prompt()
+          # Copy firmware
+          if protocol == 'tftp':
+            output = net_connect.send_command_timing('copy ' + protocol + '://' + tftp_server + '/' + path + ' flash:', read_timeout=100)
+              
+          else:
+            output = net_connect.send_command_timing('copy ' + protocol + '://' + 'compnet:C0mpn3t!@' + tftp_server + '/' + path + ' flash:', read_timeout=100)
+              
+          # confirmation prompt enter empty string biar enter
+          output = net_connect.send_command('\n', expect_string='Accessing ' + protocol + '://', read_timeout=100)
+        
+          while True:
+            output_part = net_connect.read_channel()
+            
+            if output_part:
+              bulk_tree.set(item_id, "#6", "Copying..")
+              bulk_tree.update_idletasks()
+          
+            if device_prompt in output_part:
+              break
+
+            time.sleep(3)
+
+          output = net_connect.send_command_timing('dir flash:*.bin', delay_factor=4, max_loops=1000)
+
+          # confirm apakah file udh ad di flash or not, kalau ad kita ganti system boot ke firmware yg ud dicopy
+          if firmware in output:
+            bulk_tree.set(item_id, "#6", "Success")
+            bulk_tree.update_idletasks()
+            break
+            
+          else:
+            choice = messagebox.askquestion('Process No. ' + str(number) + ' IP: ' + ip, 'Failed to copy file. Do you want to try again?')
+            bulk_tree.set(item_id, "#6", "Fail")
+            bulk_tree.update_idletasks()
+            if choice.lower() != 'yes':
+              continue
+            else:
+              return
+        
+        #Verify MD5
+        output = net_connect.send_command('verify /md5 flash:' + firmware + ' ' + hash_value ,expect_string='...')
+
+        verified = False
+
+        while True:
+          output_part = net_connect.read_channel()
+      
+          if output_part:
+            bulk_tree.set(item_id, "#7", "Verifying..")
+            bulk_tree.update_idletasks()
+          
+          if 'Verified' in output_part:
+            verified = True
+            break
+
+          if device_prompt in output_part:
+            break
+
+          time.sleep(3)
+
+        if verified == True:
+          # Upgrade firmware
+          bulk_tree.set(item_id, "#7", "Success")
+          bulk_tree.update_idletasks()
+
+        else:
+          bulk_tree.set(item_id, "#7", "Fail")
+          bulk_tree.update_idletasks()
+          net_connect.disconnect()
+          return
+
+        output = net_connect.send_config_set('no boot system')
+
+        output = net_connect.send_config_set('boot system flash:packages.conf')
+
+        output = net_connect.send_config_set('no boot manual')
+
+        output = net_connect.send_command_timing('write memory', delay_factor=4, max_loops=1000)
+        
+        bulk_tree.set(item_id, "#8", "Upgrading..")
+        bulk_tree.update_idletasks()
+
+        output = net_connect.send_command('install add file flash:' + firmware + ' activate commit',expect_string='install_add_activate_commit')
+        
+        while True:
+          output_part = net_connect.read_channel()
+          if output_part:
+            bulk_tree.set(item_id, "#8", "Install add..")
+            bulk_tree.update_idletasks()
+  
+          if "[y/n]" in output_part:
+            output += net_connect.send_command_timing("y", strip_prompt=False, strip_command=False)
+
+          if device_prompt in output_part:
+            break
+
+          time.sleep(3)
+
+        bulk_tree.set(item_id, "#8", "Done")
+        bulk_tree.update_idletasks()
+        net_connect.disconnect()
+        bulk_tree.set(item_id, "#9", "Rebooting..")
+        bulk_tree.set(item_id, "#10", "Reconnecting..")
+        bulk_tree.update_idletasks()
+
+        reconnected = False
+        while not reconnected:
+          try:
+            with ConnectHandler(**cisco_device) as net_connect:
+              # REconnect SSH
+              bulk_tree.set(item_id, "#9", "UP")
+              bulk_tree.set(item_id, "#10", "Reconnected")
+              bulk_tree.update_idletasks()
+              reconnected = True
+
+          except (NetmikoTimeoutException, NetmikoAuthenticationException) as e:
+            bulk_tree.set(item_id, "#10", "Reconnecting..")
+            bulk_tree.update_idletasks()
+            reconnected = False
+            time.sleep(2)
+            
+          except Exception as e:
+            bulk_tree.set(item_id, "#10", "Reconnecting..")
+            bulk_tree.update_idletasks()
+            reconnected = False
+            time.sleep(2)
+          
+
+        shupdatever = net_connect.send_command_timing('show ver', delay_factor=4, max_loops=1000)
+        firstline = shupdatever.strip().split('\n')[1]
+        version_index = firstline.find("Version")
+
+        # Get version after upd
+        if version_index != -1:
+          comma_index = firstline.find(",", version_index)
+          if comma_index != -1:
+            updatever = firstline[version_index + len("Version"):comma_index]
+          else:
+            updatever = 'Not Found'
+        else:
+          updatever = 'Not Found'
+            
+        bulk_tree.set(item_id, "#11", updatever)
+        bulk_tree.update_idletasks()
+
+        if updatever != currentver:
+          #config verify
+          bulk_tree.set(item_id, "#12", "Verifying..")
+          bulk_tree.update_idletasks()
+
+          updateconfig = net_connect.send_command('show run', read_timeout=300)
+          
+          updateconf_lines = updateconfig.strip().split('\n')
+          currentconf_lines = currentconfig.strip().split('\n')
+
+          confdiff = difflib.unified_diff(currentconf_lines, updateconf_lines)
+          # Check if there are differences
+          if any(confdiff):
+            added_lines =[]
+            removed_lines = []
+            # Classify lines as added (+) or removed (-)
+            for line in confdiff:
+              if line.startswith('+'):
+                added_lines.append(line[1:])  
+              elif line.startswith('-'):
+                removed_lines.append(line[1:]) 
+
+            bulk_tree.set(item_id, "#12", "Not Match")
+            bulk_tree.update_idletasks()
+
+            conf_filename = f"{switch_type}_{ip}_conf.txt"
+            with open(os.path.join(save_path, conf_filename), 'w') as f:
+              f.write("Added lines:\n")
+              for line in added_lines:
+                f.write(f"+ {line}\n")
+              
+              f.write("\nRemoved lines:\n")
+              for line in removed_lines:
+                f.write(f"- {line}\n")
+                
+          else:
+            # If no differences, display confirmation message
+            bulk_tree.set(item_id, "#12", "Match")
+            bulk_tree.update_idletasks()
+
+          bulk_tree.set(item_id, "#13", "Verifying..")
+          bulk_tree.update_idletasks()
+
+          updateint = net_connect.send_command('show ip int br', read_timeout=300)
+          updateint_lines = updateint.strip().split('\n')
+          currentint_lines = currentint.strip().split('\n')
+          
+          intdiff = difflib.unified_diff(currentint_lines, updateint_lines)
+          # Check if there are differences
+          if any(intdiff):
+            added_lines =[]
+            removed_lines = []
+            # Classify lines as added (+) or removed (-)
+            for line in intdiff:
+              if line.startswith('+'):
+                added_lines.append(line[1:])  
+              elif line.startswith('-'):
+                removed_lines.append(line[1:])  
+
+            bulk_tree.set(item_id, "#13", "Not Match")
+            bulk_tree.update_idletasks()
+
+            int_filename = f"{switch_type}_{ip}_int.txt"
+            with open(os.path.join(save_path, int_filename), 'w') as f:
+              f.write("Added lines:\n")
+              for line in added_lines:
+                f.write(f"+ {line}\n")
+              
+              f.write("\nRemoved lines:\n")
+              for line in removed_lines:
+                f.write(f"- {line}\n")      
+          else:
+            # If no differences, display confirmation message
+            bulk_tree.set(item_id, "#13", "Match")
+            bulk_tree.update_idletasks()
+              
+          bulk_tree.set(item_id, "#14", "Verifying..")
+          bulk_tree.update_idletasks()
+
+          updatevlan = net_connect.send_command('show vlan', read_timeout=300)
+          net_connect.disconnect()
+          updatevlan_lines = updatevlan.strip().split('\n')
+          currentvlan_lines = currentvlan.strip().split('\n')
+
+          vlandiff = difflib.unified_diff(updatevlan_lines, currentvlan_lines)
+
+          # Check if there are differences
+          if any(vlandiff):
+            added_lines =[]
+            removed_lines = []
+            # Classify lines as added (+) or removed (-)
+            for line in vlandiff:
+              if line.startswith('+'):
+                added_lines.append(line[1:])  
+              elif line.startswith('-'):
+                removed_lines.append(line[1:]) 
+
+            bulk_tree.set(item_id, "#14", "Not Match")
+            bulk_tree.update_idletasks()
+
+            vlan_filename = f"{switch_type}_{ip}_vlan.txt"
+            with open(os.path.join(save_path, vlan_filename), 'w') as f:
+              f.write("Added lines:\n")
+              for line in added_lines:
+                f.write(f"+ {line}\n")
+              
+              f.write("\nRemoved lines:\n")
+              for line in removed_lines:
+                f.write(f"- {line}\n")
+          else:
+            # If no differences, display confirmation message
+            bulk_tree.set(item_id, "#14", "Match")
+            bulk_tree.update_idletasks()
+              
+          bulk_tree.set(item_id, "#15", "Done!")
+          bulk_tree.update_idletasks()
+          time.sleep(3)
+
+        else:
+          bulk_tree.set(item_id, "#11", "Not Updated")
+          bulk_tree.update_idletasks()
+          net_connect.disconnect() 
+        
           
   style = ttk.Style()
-  style.layout("Treeview",[('Treeview.treearea', {'sticky': 'nswe'})])  # Remove border from the treeview
+  style.layout("Treeview",[('Treeview.treearea', {'sticky': 'nswe'})]) 
   style.layout("Custom.Treeview.Heading", style.layout("Treeview.Heading"))
 
   # Custom separator line style
@@ -823,9 +825,11 @@ def create_bulk_gui(header,bulk_frame):
   bulk_tree.configure(yscroll=scrollbar.set)
   scrollbar.grid(row=8, column=1, sticky="ns")
 
-  # Configure the grid to expand properly
   bulk_frame.grid_rowconfigure(3, weight=1)
   bulk_frame.grid_columnconfigure(1, weight=1)
 
   bulk_frame.pack()
 
+def fetch_swtype():
+  global fetch_available_switch_types
+  fetch_available_switch_types()

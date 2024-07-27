@@ -1,72 +1,77 @@
 import tkinter as tk
-import db_connection as couch
-import couchdb
+import db_connection as db
 import threading
 import time
 import difflib
 import re
+import json
 from netmiko import ConnectHandler
 from tkinter import ttk,simpledialog,messagebox
 
+# Single mode update UI & functions
 def create_single_gui(single_frame):
+  # Get data from JSON local file as db
+  json_data = db.json_data
+  file_path = db.file_path
 
-  def decide_protocol(event=None):
-    global protocol
-    protocol = select_transfer_var.get()
-
+  # Get switch types available from json file
   def fetch_available_switch_types(event=None):
-    if not couch.db_connection:
-        output_text.insert(tk.END, "Cannot access database. Not connected.\n")
-        return
+    if json_data is None:
+      output_text.insert(tk.END, "Cannot access database. JSON not loaded.\n")
+      return
       
     try:
-      all_docs = couch.db.view('_all_docs')
-      switch_types = [row.id for row in all_docs]
+      switch_types = list(json_data.get("UpdateDB", {}).keys())
       switch_type_dropdown['values'] = switch_types
-    except couchdb.http.ResourceNotFound:
-      output_text.insert(tk.END,"Database not found")
-
+    except Exception as e:
+      output_text.insert(tk.END,f"Failed Fetching SW types. {e}")
+  
+  # Get versions available for update from switch type
   def fetch_versions(event=None):
     version_var.set("")
     global switch_type
     switch_type = switch_type_var.get()
-    if not couch.db_connection:
-        output_text.insert(tk.END, "Cannot access database. Not connected.\n")
-        return
+    if json_data is None:
+      output_text.insert(tk.END, "Cannot access database. JSON not loaded.\n")
+      return
     try:
-      data = couch.db[switch_type]
-      versions = [version["name"] for version in data["versions"]]
+      switch_data = json_data.get("UpdateDB", {}).get(switch_type, {})
+      versions = [version["name"] for version in switch_data.get("versions", [])]
       version_dropdown.config(values=versions)
       version_dropdown.config(state="readonly")
-    except couchdb.http.ResourceNotFound:
-      output_text.insert(tk.END,"Document not found in CouchDB")
+    except Exception as e:
+      output_text.insert(tk.END,"Failed fetching version")
   
+  # Retrieves information about the version to be updated
   def retrieve_data(event=None):
     global version_name, hash_value, firmware, size, path
     version_name = version_var.get()
-    if not couch.db_connection:
-        output_text.insert(tk.END, "Cannot access database. Not connected.\n")
-        return
+    if json_data is None:
+      output_text.insert(tk.END, "Cannot access database. JSON not loaded.\n")
+      return
     try:
-      data = couch.db[switch_type]
-      for version in data["versions"]:
+      switch_data = json_data.get("UpdateDB", {}).get(switch_type, {})
+      for version in switch_data.get("versions", []):
         if version["name"] == version_name:
           hash_value = version["hash"]
           firmware = version["firmware"]
-          size = version["size"]
+          size = int(version["size"])
           path = version["path"]
           output_text.delete('1.0', tk.END)
           output_text.insert(tk.END,f"Hash: {hash_value}\nFirmware: {firmware}\nSize: {size}\nPath: {path}")
           # You can assign these values to variables if needed
           break
-    except couchdb.http.ResourceNotFound:
-      output_text.insert(tk.END,"Document not found in CouchDB")
+      else:
+        output_text.insert(tk.END, "Version not found")
+    except Exception as e:
+      output_text.insert(tk.END,f"Error retrieving data: {e}")
   
+  # Add new switch type to the db
   def add_new_device(event=None):
     output_text.delete('1.0', tk.END)
     global switch_type, version_name, hash_value, firmware, size, path
-    if not couch.db_connection:
-        output_text.insert(tk.END, "Cannot access database. Not connected.\n")
+    if json_data is None:
+        output_text.insert(tk.END, "Cannot access database. JSON not loaded.\n")
         return
     new_window = tk.Toplevel(single_frame)
     new_window.title("Add New Device")
@@ -110,28 +115,39 @@ def create_single_gui(single_frame):
       path = path_entry.get()
 
       new_document = {
-        "_id": switch_type,
         "versions": [{
-          "name": version_name,
-          "firmware": firmware,
-          "hash": hash_value,
-          "size": size,
-          "path": path
+            "name": version_name,
+            "firmware": firmware,
+            "hash": hash_value,
+            "size": int(size),
+            "path": path
         }]
       }
-      couch.db.save(new_document)
-      output_text.insert(tk.END,"New device added to the database.")
+
+      if "UpdateDB" not in json_data:
+        json_data["UpdateDB"] = {}
+          
+      if switch_type in json_data["UpdateDB"]:
+        json_data["UpdateDB"][switch_type]["versions"].append(new_document["versions"][0])
+      else:
+        json_data["UpdateDB"][switch_type] = new_document
+      
+      with open(file_path, 'w') as file:
+        json.dump(json_data, file, indent=4)
+
+      output_text.insert(tk.END, "New device added to the JSON file.")
       fetch_available_switch_types()
       new_window.destroy()
 
     add_button = tk.Button(new_window, text="Add Device", command=add_device)
     add_button.grid(row=6, column=0, columnspan=2)
 
+  # add new version to existing switch type
   def add_new_version(event=None):
     output_text.delete('1.0', tk.END)
     global switch_type
-    if not couch.db_connection:
-        output_text.insert(tk.END, "Cannot access database. Not connected.\n")
+    if json_data is None:
+        output_text.insert(tk.END, "Cannot access database. JSON file not loaded.\n")
         return
     new_window = tk.Toplevel(single_frame)
     new_window.title("Add New Version")
@@ -143,13 +159,8 @@ def create_single_gui(single_frame):
     switch_type_dropdown = ttk.Combobox(new_window, textvariable=switch_type_var, state="readonly")
     switch_type_dropdown.grid(row=0, column=1)
 
-    # Fetch available switch types from the database
-    try:
-      all_docs = couch.db.view('_all_docs')
-      switch_types = [row.id for row in all_docs]
-      switch_type_dropdown['values'] = switch_types
-    except couchdb.http.ResourceNotFound:
-      output_text.insert(tk.END,"Database not found")
+    switch_types = list(json_data.get("UpdateDB", {}).keys())
+    switch_type_dropdown['values'] = switch_types
 
     def add_version():
       selected_switch_type = switch_type_var.get()
@@ -161,24 +172,24 @@ def create_single_gui(single_frame):
         new_path = path_entry.get()
 
         # Update existing document with new version
-        try:
-          existing_doc = couch.db[selected_switch_type]
-          existing_doc["versions"].append({
+        if selected_switch_type in json_data["UpdateDB"]:
+          json_data["UpdateDB"][selected_switch_type]["versions"].append({
             "name": new_version_name,
             "firmware": new_firmware,
             "hash": new_hash,
-            "size": new_size,
+            "size": int(new_size),
             "path": new_path
           })
-          couch.db.save(existing_doc)
-          output_text.insert(tk.END,"New version added to the existing document.")
+          with open(file_path, 'w') as file:
+            json.dump(json_data, file, indent=4)
+          output_text.insert(tk.END, "New version added to the existing device.")
           version_var.set("")
           fetch_versions()
           new_window.destroy()
-        except couchdb.http.ResourceNotFound:
-          output_text.insert(tk.END,"Document not found in CouchDB")
+        else:
+            output_text.insert(tk.END, "Switch type not found in JSON data")
       else:
-        output_text.insert(tk.END,"Please select a switch type first.")
+          output_text.insert(tk.END, "Please select a switch type first.")
 
     version_name_label = tk.Label(new_window, text="Enter Version Name:")
     version_name_label.grid(row=1, column=0)
@@ -208,55 +219,110 @@ def create_single_gui(single_frame):
     add_button = tk.Button(new_window, text="Add Version to existing Device", command=add_version)
     add_button.grid(row=6, column=0, columnspan=2)
   
+  # Delete switch type from db
   def delete_switch_type(event=None):
     output_text.delete('1.0', tk.END)
     switch_type = switch_type_var.get()
-    if not couch.db_connection:
-        output_text.insert(tk.END, "Cannot access database. Not connected.\n")
-        return
+    if json_data is None:
+      output_text.insert(tk.END, "Cannot access database. JSON not loaded.\n")
+      return
     if switch_type:
       confirm = simpledialog.askstring("Confirmation", f"Are you sure you want to delete {switch_type}? (yes/no)")
       if confirm and confirm.lower() == "yes":
         try:
-          del couch.db[switch_type]
-          output_text.insert(tk.END, f"Switch type '{switch_type}' deleted from the database.")
-          version_var.set("")
-          switch_type_var.set("")
-          fetch_available_switch_types()
-          fetch_versions()
-        except couchdb.http.ResourceNotFound:
-          output_text.insert(tk.END, f"Switch type '{switch_type}' not found in CouchDB.")
+          if switch_type in json_data.get("UpdateDB", {}):
+            del json_data["UpdateDB"][switch_type]
+            with open(file_path, 'w') as file:
+                json.dump(json_data, file, indent=4)
+            output_text.insert(tk.END, f"Switch type '{switch_type}' deleted from the JSON file.")
+            version_var.set("")
+            switch_type_var.set("")
+            fetch_available_switch_types()
+            fetch_versions()
+          else:
+            output_text.insert(tk.END, f"Switch type '{switch_type}' not found in JSON data.")
+        except Exception as e:
+          output_text.insert(tk.END, f"Error deleting switch type: {e}")
     else:
       output_text.insert(tk.END,"Please select switch type to delete.")
 
+  # delete version from existing sw type
   def delete_version(event=None):
     output_text.delete('1.0', tk.END)
     switch_type = switch_type_var.get()
     version_name = version_var.get()
+    
+    if json_data is None:
+      output_text.insert(tk.END, "Cannot access database. JSON not loaded.\n")
+      return
+      
     if switch_type and version_name:
       confirm = simpledialog.askstring("Confirmation", f"Are you sure you want to delete version '{version_name}' of {switch_type}? (yes/no)")
       if confirm and confirm.lower() == "yes":
         try:
-          doc = couch.db[switch_type]
-          versions = doc["versions"]
+          switch_data = json_data.get("UpdateDB", {}).get(switch_type, {})
+          versions = switch_data.get("versions", [])
           for version in versions:
             if version["name"] == version_name:
               versions.remove(version)
-              couch.db.save(doc)
-              output_text.insert(tk.END,f"Version '{version_name}' deleted from the document '{switch_type}'.")
+              # Save changes to the JSON file
+           
+              json_data["UpdateDB"][switch_type]["versions"] = versions
+            
+              with open(file_path, 'w') as file:
+                json.dump(json_data, file, indent=4)
+              output_text.insert(tk.END, f"Version '{version_name}' deleted from the switch type '{switch_type}'.")
               version_var.set("")
               fetch_versions()  # Refresh version dropdown
               return
-          output_text.insert(tk.END,f"Version '{version_name}' not found in the document '{switch_type}'.")
-        except couchdb.http.ResourceNotFound:
-          output_text.insert(tk.END,f"Document '{switch_type}' not found in CouchDB.")
+          output_text.insert(tk.END, f"Version '{version_name}' not found in the switch type '{switch_type}'.")
+        except Exception as e:
+            output_text.insert(tk.END, f"Error deleting version: {e}")
     else:
       output_text.insert(tk.END,"Please select both switch type and version to delete.")
 
+  # Show current database of devices list
+  def show_update_db_popup():
+    popup_window = tk.Toplevel()
+    popup_window.title("UpdateDB Contents")
+
+    text_frame = tk.Frame(popup_window)
+    text_frame.pack(fill=tk.BOTH, expand=True)
+
+    text_widget = tk.Text(text_frame, wrap=tk.WORD, height=20, width=100)
+    text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    scrollbar = tk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    text_widget.config(yscrollcommand=scrollbar.set)
+
+    if json_data is None or "UpdateDB" not in json_data:
+      text_widget.insert(tk.END, "Cannot access database or UpdateDB not loaded.\n")
+      return
+
+    try:
+      update_db = json_data["UpdateDB"]
+      for switch_type, switch_info in update_db.items():
+        text_widget.insert(tk.END, f"{switch_type}\n")
+        for version in switch_info.get("versions", []):
+          text_widget.insert(tk.END, f"  > version {version.get('name', 'N/A')}\n")
+          text_widget.insert(tk.END, f"    - firmware = {version.get('firmware', 'N/A')}\n")
+          text_widget.insert(tk.END, f"    - hash = {version.get('hash', 'N/A')}\n")
+          text_widget.insert(tk.END, f"    - size = {version.get('size', 'N/A')}\n")
+          text_widget.insert(tk.END, f"    - path = {version.get('path', 'N/A')}\n")
+          text_widget.insert(tk.END, "\n")
+    except Exception as e:
+      text_widget.insert(tk.END, f"Error displaying data: {e}\n")
+
+    popup_window.geometry('800x600')
+  
+  # Start ssh & perform update function
   def start_ssh():
     output_text.delete('1.0', tk.END)
     threading.Thread(target=cisco_ssh).start()
 
+  # ssh for cisco device
   def cisco_ssh():
     global output_part
     # Ambil data dr input field GUI
@@ -264,7 +330,9 @@ def create_single_gui(single_frame):
     username = username_entry.get()
     password = password_entry.get()
     tftp_server = tftp_entry.get()
+    protocol = select_transfer_var.get()
 
+    # SSH parameter from user input before
     if switch_type == 'C2960': 
       cisco_device = {
         'device_type': 'cisco_ios',
@@ -284,7 +352,7 @@ def create_single_gui(single_frame):
 
     if switch_type == 'C2960':
       try:
-        output_text.insert(tk.END,'Connecting to Cisco ' + switch_type +'\n') 
+        output_text.insert(tk.END,f'Connecting to Cisco {switch_type} via {protocol} \n') 
         output_text.update_idletasks() 
         output_text.insert(tk.END, str(size) + '\n')
         output_text.update_idletasks() 
@@ -325,8 +393,12 @@ def create_single_gui(single_frame):
           output_text.insert(tk.END, 'Checking Flash Storage....' + '\n')
           output_text.update_idletasks() 
           output_text.see(tk.END)
-          output = net_connect.send_command('dir flash:')
-          bytes_free_pattern = r'(\d+) bytes free'
+          output = net_connect.send_command('dir flash: ')
+          print("Raw output from 'dir flash:':\n", output)
+          output_text.insert(tk.END, f'Raw output from "dir flash:":\n{output}\n')
+          output_text.update_idletasks()
+          output_text.see(tk.END)
+          bytes_free_pattern = r'\((\d+) bytes free\)'
           matches = re.search(bytes_free_pattern, output)
 
           if matches:
@@ -360,7 +432,6 @@ def create_single_gui(single_frame):
                 
 
                 while True:
-                  # Capture the output incrementally
                   output_part = net_connect.read_channel()
                   
                   if output_part:
@@ -371,7 +442,6 @@ def create_single_gui(single_frame):
                   if device_prompt in output_part:
                     break
 
-                  # Sleep to avoid overwhelming the device with continuous reads
                   time.sleep(3)
 
                 output = net_connect.send_command_timing('dir flash:*.bin', delay_factor=4, max_loops=1000)
@@ -402,7 +472,6 @@ def create_single_gui(single_frame):
                     if device_prompt in output_part:
                       break
 
-                    # Sleep to avoid overwhelming the device with continuous reads
                     time.sleep(3)
 
                   if verified == True:
@@ -457,16 +526,16 @@ def create_single_gui(single_frame):
                             currentconf_lines = currentconfig.strip().split('\n')
 
                             confdiff = difflib.unified_diff(currentconf_lines, updateconf_lines)
-                            # Check if there are differences
+                            # Check difference in running config
                             if any(confdiff):
-                              # If differences exist, display the differing lines
+                              # If differences exist, show diff
                               output_text.insert(tk.END, 'Differences found in configuration:\n')
                               for line in confdiff:
                                 output_text.insert(tk.END, line + '\n')
                             else:
-                              # If no differences, display confirmation message
+                              # If no differences, show verification
                               output_text.insert(tk.END, 'Configuration Verified!\n')
-                            # Update the text box and ensure the last line is visible
+                           
                             output_text.update_idletasks()
                             output_text.see(tk.END)
 
@@ -479,14 +548,14 @@ def create_single_gui(single_frame):
                             currentint_lines = currentint.strip().split('\n')
                             
                             intdiff = difflib.unified_diff(currentint_lines, updateint_lines)
-                            # Check if there are differences
+                            # Check difference in interface status
                             if any(intdiff):
-                              # If differences exist, display the differing lines
+                              # If differences exist, show diff
                               output_text.insert(tk.END, 'Differences found in interfaces info:\n')
                               for line in intdiff:
                                 output_text.insert(tk.END, line + '\n')
                             else:
-                              # If no differences, display confirmation message
+                              # If no differences, show verification
                               output_text.insert(tk.END, 'Interfaces Verified!\n')
                             
                             output_text.insert(tk.END, 'Verifying VLANs...\n')
@@ -499,14 +568,14 @@ def create_single_gui(single_frame):
 
                             vlandiff = difflib.unified_diff(updatevlan_lines, currentvlan_lines)
 
-                            # Check if there are differences
+                            # Check difference in vlan 
                             if any(vlandiff):
-                              # If differences exist, display the differing lines
+                              # If differences exist, show diff
                               output_text.insert(tk.END, 'Differences found in VLAN configuration:\n')
                               for line in vlandiff:
                                 output_text.insert(tk.END, line + '\n')
                             else:
-                              # If no differences, display confirmation message
+                              # If no differences, show verification
                               output_text.insert(tk.END, 'VLAN Configuration Verified!\n')
 
                             net_connect.disconnect()
@@ -533,7 +602,7 @@ def create_single_gui(single_frame):
                   if choice.lower() != 'yes':
                     return
                   else:
-                    # Continue to the beginning of the outer while loop for retry
+                    # Continue to try tftp/ftp agane
                     continue
 
             elif free_bytes < size:
@@ -593,9 +662,14 @@ def create_single_gui(single_frame):
           output_text.update_idletasks() 
           output_text.see(tk.END)
           output = net_connect.send_command('dir flash:')
-          bytes_free_pattern = r'(\d+) bytes free'
+          print("Raw output from 'dir flash:':\n", output)
+          output_text.insert(tk.END, f'Raw output from "dir flash:":\n{output}\n')
+          output_text.update_idletasks()
+          output_text.see(tk.END)
+          bytes_free_pattern = r'\((\d+) bytes free\)'
           matches = re.search(bytes_free_pattern, output)
-
+          free_bytes = int(matches.group(1))
+        
           if matches:
             free_bytes = int(matches.group(1))
             if free_bytes > size:
@@ -626,7 +700,6 @@ def create_single_gui(single_frame):
                 output_text.see(tk.END)
                 
                 while True:
-                  # Capture the output incrementally
                   output_part = net_connect.read_channel()
                   
                   if output_part:
@@ -637,7 +710,6 @@ def create_single_gui(single_frame):
                   if device_prompt in output_part:
                     break
 
-                  # Sleep to avoid overwhelming the device with continuous reads
                   time.sleep(3)
 
                 # confirm apakah copy tftp success or not, kalau ad lanjut cek flash di switch
@@ -669,7 +741,6 @@ def create_single_gui(single_frame):
                     if device_prompt in output_part:
                       break
 
-                    # Sleep to avoid overwhelming the device with continuous reads
                     time.sleep(3)
 
                   if verified == True:
@@ -699,7 +770,6 @@ def create_single_gui(single_frame):
                     output_text.see(tk.END)
 
                     while True:
-                      # Capture the output incrementally
                       output_part = net_connect.read_channel()
                       if output_part:
                         output_text.insert(tk.END, output_part)  
@@ -709,11 +779,9 @@ def create_single_gui(single_frame):
                       if "[y/n]" in output_part:
                         output += net_connect.send_command_timing("y", strip_prompt=False, strip_command=False)
 
-                      # Check for the expected prompt to know the command is complete
                       if device_prompt in output_part:
                         break
 
-                      # Sleep to avoid overwhelming the device with continuous reads
                       time.sleep(3)
 
                     net_connect.disconnect()
@@ -770,16 +838,16 @@ def create_single_gui(single_frame):
                             currentconf_lines = currentconfig.strip().split('\n')
 
                             confdiff = difflib.unified_diff(currentconf_lines, updateconf_lines)
-                            # Check if there are differences
+                            # Check difference in running config
                             if any(confdiff):
-                              # If differences exist, display the differing lines
+                              # If differences exist, show diff
                               output_text.insert(tk.END, 'Differences found in configuration:\n')
                               for line in confdiff:
                                 output_text.insert(tk.END, line + '\n')
                             else:
-                              # If no differences, display confirmation message
+                              # If no differences, show verification
                               output_text.insert(tk.END, 'Configuration Verified!\n')
-                            # Update the text box and ensure the last line is visible
+
                             output_text.update_idletasks()
                             output_text.see(tk.END)
 
@@ -792,14 +860,14 @@ def create_single_gui(single_frame):
                             currentint_lines = currentint.strip().split('\n')
                             
                             intdiff = difflib.unified_diff(currentint_lines, updateint_lines)
-                            # Check if there are differences
+                            # Check difference in interface status
                             if any(intdiff):
-                              # If differences exist, display the differing lines
+                              # If differences exist, show diff
                               output_text.insert(tk.END, 'Differences found in interfaces info:\n')
                               for line in intdiff:
                                 output_text.insert(tk.END, line + '\n')
                             else:
-                              # If no differences, display confirmation message
+                              # If no differences, show verification
                               output_text.insert(tk.END, 'Interfaces Verified!\n')
                             
                             output_text.insert(tk.END, 'Verifying VLANs...\n')
@@ -812,14 +880,14 @@ def create_single_gui(single_frame):
 
                             vlandiff = difflib.unified_diff(updatevlan_lines, currentvlan_lines)
 
-                            # Check if there are differences
+                            # Check difference in vlan
                             if any(vlandiff):
-                              # If differences exist, display the differing lines
+                              # If differences exist, show diff
                               output_text.insert(tk.END, 'Differences found in VLAN configuration:\n')
                               for line in vlandiff:
                                 output_text.insert(tk.END, line + '\n')
                             else:
-                              # If no differences, display confirmation message
+                              # If no differences, show verification
                               output_text.insert(tk.END, 'VLAN Configuration Verified!\n')
 
                             net_connect.disconnect()
@@ -848,7 +916,7 @@ def create_single_gui(single_frame):
                   if choice.lower() != 'yes':
                     return
                   else:
-                    # Continue to the beginning of the outer while loop for retry
+                    # Continue retry tftp/ftp agane
                     continue
 
             elif free_bytes < size:
@@ -860,22 +928,18 @@ def create_single_gui(single_frame):
               output_text.see(tk.END)
 
               while True:
-                # Capture the output incrementally
                 output_part = net_connect.read_channel()
                 if output_part:
                   output_text.insert(tk.END, output_part)  
                   output_text.update_idletasks()
                   output_text.see(tk.END)  
-                
-                # This part handles the real-time printing of ongoing process like !!!!
+
                 if '[y/n]' in output_part:
                   output += net_connect.send_command_timing("y")
-                    
-                # Check for the expected prompt to know the command is complete
+
                 if device_prompt in output_part:
                   break
 
-                # Sleep to avoid overwhelming the device with continuous reads
                 time.sleep(3)
 
               output_text.insert(tk.END, 'Done Cleaning, please start the program again..\n')
@@ -896,7 +960,7 @@ def create_single_gui(single_frame):
   switch_type_label.grid(row=1, column=0, padx=10, pady=3, sticky=tk.W)
   switch_type_var = tk.StringVar()
   switch_type_dropdown = ttk.Combobox(single_frame, textvariable=switch_type_var, state='readonly')
-  switch_type_dropdown.grid(row=1, column=1, padx=(120,0), pady=3)
+  switch_type_dropdown.grid(row=1, column=1,pady=3)
   switch_type_dropdown.bind('<<ComboboxSelected>>', fetch_versions)
 
   # OS Selection dropdown menu
@@ -904,62 +968,64 @@ def create_single_gui(single_frame):
   version_label.grid(row=2, column=0, padx=10, pady=3, sticky=tk.W)
   version_var = tk.StringVar()
   version_dropdown = ttk.Combobox(single_frame, textvariable=version_var,state='disabled')
-  version_dropdown.grid(row=2, column=1, padx=(120,0), pady=3)
+  version_dropdown.grid(row=2, column=1, pady=3)
   version_dropdown.bind('<<ComboboxSelected>>', retrieve_data)
 
   # input field buat IP, user, pass, server tftp
   ip_label = ttk.Label(single_frame, text='Device IP:')
   ip_label.grid(row=3, column=0, padx=10, pady=3, sticky=tk.W)
   ip_entry = ttk.Entry(single_frame, width=23)
-  ip_entry.grid(row=3, column=1, padx=(120,0), pady=3)
+  ip_entry.grid(row=3, column=1, pady=3)
 
   username_label = ttk.Label(single_frame, text='Username:')
   username_label.grid(row=4, column=0, padx=10, pady=3, sticky=tk.W)
   username_entry = ttk.Entry(single_frame, width=23)
-  username_entry.grid(row=4, column=1, padx=(120,0), pady=3)
+  username_entry.grid(row=4, column=1, pady=3)
 
   password_label = ttk.Label(single_frame, text='Password:')
   password_label.grid(row=5, column=0, padx=10, pady=3, sticky=tk.W)
   password_entry = ttk.Entry(single_frame, show='*', width=23)
-  password_entry.grid(row=5, column=1, padx=(120,0), pady=3)
+  password_entry.grid(row=5, column=1, pady=3)
 
   select_transfer_label = ttk.Label(single_frame, text='Select TFTP/FTP:')
   select_transfer_label.grid(row=6, column=0, padx=10, pady=3, sticky=tk.W)
   select_transfer_var = tk.StringVar()
   select_transfer_dropdown = ttk.Combobox(single_frame, textvariable=select_transfer_var, values=['tftp', 'ftp'])
-  select_transfer_dropdown.grid(row=6, column=1, padx=(120,0), pady=3)
-  select_transfer_dropdown.bind('<<ComboboxSelected>>', decide_protocol)
+  select_transfer_dropdown.grid(row=6, column=1, pady=3)
 
   tftp_label = ttk.Label(single_frame, text='TFTP/FTP Server IP:')
   tftp_label.grid(row=7, column=0, padx=10, pady=3, sticky=tk.W)
   tftp_entry = ttk.Entry(single_frame, width=23)
-  tftp_entry.grid(row=7, column=1, padx=(120,0), pady=3)
+  tftp_entry.grid(row=7, column=1, pady=3)
 
   add_ver = ttk.Button(single_frame, text='Add Version to existing', command=add_new_version)
-  add_ver.grid(row=8, column=0, padx=(0,242), pady=2)
+  add_ver.grid(row=8, column=0,padx=(0,295),pady=2)
 
   delete_ver = ttk.Button(single_frame, text='Delete Existing version', command=delete_version)
-  delete_ver.grid(row=9, column=0, padx=(0,247),pady=2)
+  delete_ver.grid(row=9, column=0,padx=(0,298),pady=2)
 
   add_device = ttk.Button(single_frame, text='Add Device', command=add_new_device)
-  add_device.grid(row=10, column=0, padx=(0,300), pady=2)
+  add_device.grid(row=8, column=0, pady=2)
 
   delete_device = ttk.Button(single_frame, text='Delete Device', command=delete_switch_type)
-  delete_device.grid(row=11, column=0, padx=(0,295), pady=2)
+  delete_device.grid(row=9, column=0, pady=2)
+  
+  delete_device = ttk.Button(single_frame, text='Show Device List', command=show_update_db_popup)
+  delete_device.grid(row=10, column=0,padx=(0,330),pady=2)
 
   # Start button execute firmware up
   start_button = ttk.Button(single_frame, text='Start SSH', command=start_ssh)
-  start_button.grid(row=12, column=0, padx=(0,300),pady=2)
+  start_button.grid(row=11, column=0,padx=(0,350), pady=2)
 
   output_frame = tk.Frame(single_frame)
-  output_frame.grid(row=13, column=0,columnspan=2, padx=10, pady=5)
+  output_frame.grid(row=12, column=0,columnspan=2, padx=10, pady=5)
 
   # Create a scrollbar for the version_text
   output_scrollbar = tk.Scrollbar(output_frame, orient="vertical")
   output_scrollbar.pack(side="right", fill="y")
 
   # Create the version_text widget
-  output_text = tk.Text(output_frame, height=18, width=80, yscrollcommand=output_scrollbar.set)
+  output_text = tk.Text(output_frame, height=18, width=70, yscrollcommand=output_scrollbar.set)
   output_text.pack(side="left", fill="both", expand=True)
   output_scrollbar.config(command=output_text.yview)
 
