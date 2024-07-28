@@ -1,6 +1,6 @@
 import os
 import tkinter as tk
-from tkinter import ttk,filedialog,font
+from tkinter import ttk,filedialog,font, messagebox
 from netmiko import ConnectHandler
 import threading
 import csv
@@ -42,6 +42,14 @@ def capture_config_gui(cap_header,capture_frame):
       cap_tree.delete(item)
 
     if loaded_csv:
+      required_fields = ['vendor', 'ip', 'user', 'password', 'protocol', 'secret']
+      # Check for missing fields
+      missing_fields = [field for field in required_fields if field not in loaded_csv[0]]
+
+      if missing_fields:
+        messagebox.showwarning("Warning", f"CSV is missing the following required fields: {', '.join(missing_fields)}")
+        return
+      
       for i, item in enumerate(cap_header):
         cap_tree.heading("#" + str(i+1), text=item)
         cap_tree.column("#" + str(i+1), stretch=True, width=100)
@@ -164,7 +172,7 @@ def capture_config_gui(cap_header,capture_frame):
   
   bold_font = font.Font(family="TkDefaultFont", weight="bold",size=10)
   
-  info_label = ttk.Label(capture_frame, text='CSV Format = vendor, ip, user, password, protocol (telnet/ssh)', font=bold_font)
+  info_label = ttk.Label(capture_frame, text='CSV Format = vendor, ip, user, password, secret, protocol (telnet/ssh)', font=bold_font)
   info_label.grid(row=1, column=0,columnspan=2)
 
   capturelog_label = ttk.Label(capture_frame, text='Path to Store Capture Logs:')

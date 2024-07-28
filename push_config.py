@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk,filedialog,font
+from tkinter import ttk,filedialog,font, messagebox
 import csv
 import threading
 import datetime
@@ -41,6 +41,14 @@ def push_config_gui(push_header,push_frame):
 
     data = load_csv()
     if data:
+      required_fields = ['vendor', 'ip', 'user', 'password', 'protocol', 'tftp_ip', 'filepath', 'file', 'secret']
+
+      # Check for missing fields
+      missing_fields = [field for field in required_fields if field not in data[0]]
+
+      if missing_fields:
+        messagebox.showwarning("Warning", f"CSV is missing the following required fields: {', '.join(missing_fields)}")
+        return
       # Create header row
       for i, item in enumerate(push_header):
         push_tree.heading("#" + str(i+1), text=item)
@@ -66,6 +74,7 @@ def push_config_gui(push_header,push_frame):
     password = push['password']
     protocol = push['protocol']
     server = push['tftp_ip']
+    secret = push['secret']
     tftp_address = f'{server}/{filepath}/{file}'
     capture_log_path = capturelog_entry.get()
     log_path = error_path_entry.get()
@@ -80,6 +89,7 @@ def push_config_gui(push_header,push_frame):
         'username': user,
         'password': password,
         'port': 23,
+        'secret': secret
       }
     elif vendor == 'cisco' and protocol == 'ssh':
       device = {
@@ -88,6 +98,7 @@ def push_config_gui(push_header,push_frame):
         'username': user,
         'password': password,
         'port': 22,
+        'secret': secret
       }
     
     def check_connection(device):
@@ -104,6 +115,16 @@ def push_config_gui(push_header,push_frame):
       push_tree.update_idletasks()
       return
     else:
+      isenable = net_connect.check_enable_mode()
+      if isenable == False:
+        net_connect.enable()
+        net_connect.find_prompt()
+        push_tree.set(item_id, "#3", "Connected")
+        push_tree.update_idletasks()
+      else:
+        net_connect.find_prompt()
+        push_tree.set(item_id, "#3", "Connected")
+        push_tree.update_idletasks()
       net_connect.find_prompt()
       push_tree.set(item_id, '#3', "Connected")
       push_tree.update_idletasks()
@@ -504,7 +525,7 @@ def push_config_gui(push_header,push_frame):
   
   bold_font = font.Font(family="TkDefaultFont", weight="bold",size=10)
   
-  info_label = ttk.Label(push_frame, text='CSV Format = vendor, ip, user, password, protocol (telnet/ssh), tftp_ip, filepath, file', font=bold_font)
+  info_label = ttk.Label(push_frame, text='CSV Format = vendor, ip, user, password, secret, protocol (telnet/ssh), tftp_ip, filepath, file', font=bold_font)
   info_label.grid(row=1, column=0, padx=(0,10), pady=5,columnspan=3)
   
   capturelog_label = ttk.Label(push_frame, text='Path to Store Capture Logs:')

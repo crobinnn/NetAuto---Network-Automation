@@ -55,7 +55,7 @@ def process_image(image_path):
   
   return serial_number, mac_address
 
-def resize_image(image_path, size=(400, 400)):
+def resize_image(image_path, size):
   image = cv2.imread(image_path)
   def unsharp_mask(resized_image, kernel_size=(5, 5), sigma=0.5, amount=1.0, threshold=0):
     """Return a sharpened version of the image, using an unsharp mask."""
@@ -82,7 +82,7 @@ def resize_image(image_path, size=(400, 400)):
   pil_image = PILImage.fromarray(sharpened_image_rgb)
 
   # Resize image
-  resized_pil_image = pil_image.resize((400, 400), PILImage.LANCZOS)
+  resized_pil_image = pil_image.resize(size, PILImage.LANCZOS)
 
   resized_image = cv2.cvtColor(np.array(resized_pil_image), cv2.COLOR_RGB2BGR)
 

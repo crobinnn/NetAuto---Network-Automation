@@ -62,6 +62,14 @@ def create_bulk_gui(header,bulk_frame):
 
     data = load_csv()
     if data:
+      required_fields = ['user', 'password', 'protocol', 'type', 'version', 'ip', 'serverip', 'secret']
+
+      # Check for missing fields
+      missing_fields = [field for field in required_fields if field not in data[0]]
+
+      if missing_fields:
+        messagebox.showwarning("Warning", f"CSV is missing the following required fields: {', '.join(missing_fields)}")
+        return
       # Create header row
       for i, item in enumerate(header):
         bulk_tree.heading("#" + str(i+1), text=item)
@@ -84,12 +92,14 @@ def create_bulk_gui(header,bulk_frame):
     password = bulk['password']
     protocol = bulk['protocol']
     tftp_server = bulk['serverip']
+    secret = bulk['secret']
     save_path = path_entry.get()
-    doc = db.db.get(switch_type)
+    cleanup = clean_var.get()
+    doc = json_data.get("UpdateDB", {}).get(switch_type, {})
 
     if doc:
       found_version = False
-      for version in doc['versions']:
+      for version in doc.get("versions", []):
         if version['name'] == os_version:
           firmware = version['firmware']
           hash_value = version['hash']
@@ -113,6 +123,7 @@ def create_bulk_gui(header,bulk_frame):
         'username': user,
         'password': password,
         'port': 22,
+        'secret': secret
       }
     else:
       cisco_device = {
@@ -121,6 +132,7 @@ def create_bulk_gui(header,bulk_frame):
         'username': user,
         'password': password,
         'port': 22,
+        'secret': secret
       }
     
     def check_connection(cisco_device):
@@ -140,6 +152,9 @@ def create_bulk_gui(header,bulk_frame):
       isenable = net_connect.check_enable_mode()
       if isenable == False:
         net_connect.enable()
+        device_prompt = net_connect.find_prompt()
+        bulk_tree.set(item_id, "#3", "Connected")
+        bulk_tree.update_idletasks()
       else:
         device_prompt = net_connect.find_prompt()
         bulk_tree.set(item_id, "#3", "Connected")
@@ -760,7 +775,32 @@ def create_bulk_gui(header,bulk_frame):
             # If no differences, display confirmation message
             bulk_tree.set(item_id, "#14", "Match")
             bulk_tree.update_idletasks()
-              
+          
+          
+          if cleanup == 'yes':
+            output = net_connect.send_command('install remove inactive',expect_string='install_remove:')
+
+            while True:
+              output_part = net_connect.read_channel()
+              if output_part:
+                bulk_tree.set(item_id, "#15", "Cleaning Flash..")
+                bulk_tree.update_idletasks()
+
+              if '[y/n]' in output_part:
+                output += net_connect.send_command_timing("y")
+
+              if device_prompt in output_part:
+                break
+
+              time.sleep(3)
+
+            bulk_tree.set(item_id, "#15", "Cleaned Up!")
+            bulk_tree.update_idletasks()
+
+          else:
+            bulk_tree.set(item_id, "#15", "No cleanup")
+            bulk_tree.update_idletasks()
+            
           bulk_tree.set(item_id, "#15", "Done!")
           bulk_tree.update_idletasks()
           time.sleep(3)
@@ -781,13 +821,29 @@ def create_bulk_gui(header,bulk_frame):
   
   bold_font = font.Font(family="TkDefaultFont", weight="bold",size=10)
   
-  info_label = ttk.Label(bulk_frame, text='CSV Format = type, version, ip,user, password, protocol (ftp/tftp), serverip', font=bold_font)
-  info_label.grid(row=1, column=0, padx=(0,10), pady=5,)
+  info_label = ttk.Label(bulk_frame, text='CSV Format = type, version, ip,user, password, secret, protocol (ftp/tftp), serverip', font=bold_font)
+  info_label.grid(row=1, column=0, padx=(0,10), pady=5,columnspan=2)
   
   path_label = ttk.Label(bulk_frame, text='Difference Log File Path:')
-  path_label.grid(row=2, column=0, padx=(0,10), pady=5,)
+  path_label.grid(row=2, column=0, padx=(0,200), pady=5,columnspan=2)
   path_entry = ttk.Entry(bulk_frame, width=23)
-  path_entry.grid(row=3, column=0, padx=(0,7), pady=3)
+  path_entry.grid(row=3, column=0, padx=(0,200), pady=3,columnspan=2)
+  
+  clean_var = tk.StringVar(value='no')
+  cleanup_label = ttk.Label(bulk_frame, text='Clean flash after update? (IOS XE)')
+  cleanup_label.grid(row=2, column=0,columnspan=2,padx=(200,0))
+  cleanup_dropdown = ttk.Combobox(bulk_frame, textvariable=clean_var, values=['yes', 'no'])
+  cleanup_dropdown.grid(row=3, column=0,columnspan=2,padx=(200,0))
+  
+  print(clean_var.get())
+  # debug check
+  def on_clean_change(event):
+    if clean_var.get() == 'yes':
+      print('yessir')
+    else:
+      print('nossir')
+
+  cleanup_dropdown.bind('<<ComboboxSelected>>', on_clean_change)
   
   available_ver_label = ttk.Label(bulk_frame, text='Check Available Version for type:')
   available_ver_label.grid(row=4, column=0, padx=(10,0))

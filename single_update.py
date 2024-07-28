@@ -331,6 +331,7 @@ def create_single_gui(single_frame):
     password = password_entry.get()
     tftp_server = tftp_entry.get()
     protocol = select_transfer_var.get()
+    secret = secret_entry.get()
 
     # SSH parameter from user input before
     if switch_type == 'C2960': 
@@ -358,6 +359,22 @@ def create_single_gui(single_frame):
         output_text.update_idletasks() 
         
         with ConnectHandler(**cisco_device) as net_connect:
+          isenable = net_connect.check_enable_mode()
+          if isenable == False:
+            output_text.insert(tk.END, 'Currently in user exec mode, enabling...')
+            output_text.update_idletasks() 
+            output_text.see(tk.END)
+            net_connect.enable()
+            output_text.insert(tk.END, 'Entered privileged exec mode')
+            output_text.update_idletasks() 
+            output_text.see(tk.END)
+            device_prompt = net_connect.find_prompt()
+          else:
+            device_prompt = net_connect.find_prompt()
+            output_text.insert(tk.END, 'Currently in privileged exec mode already')
+            output_text.update_idletasks() 
+            output_text.see(tk.END)
+
           output_text.insert(tk.END, net_connect.find_prompt())
           shcurrentver = net_connect.send_command_timing('show ver', delay_factor=4, max_loops=1000)
           currentver = shcurrentver.strip().split('\n')[0]
@@ -626,6 +643,22 @@ def create_single_gui(single_frame):
 
         
         with ConnectHandler(**cisco_device) as net_connect:
+          isenable = net_connect.check_enable_mode()
+          if isenable == False:
+            output_text.insert(tk.END, 'Currently in user exec mode, enabling...')
+            output_text.update_idletasks() 
+            output_text.see(tk.END)
+            net_connect.enable()
+            output_text.insert(tk.END, 'Entered privileged exec mode')
+            output_text.update_idletasks() 
+            output_text.see(tk.END)
+            device_prompt = net_connect.find_prompt()
+          else:
+            device_prompt = net_connect.find_prompt()
+            output_text.insert(tk.END, 'Currently in privileged exec mode already')
+            output_text.update_idletasks() 
+            output_text.see(tk.END)
+            
           output_text.insert(tk.END, net_connect.find_prompt())
           shcurrentver = net_connect.send_command_timing('show ver', delay_factor=4, max_loops=1000)
           currentver = shcurrentver.strip().split('\n')[0]
@@ -986,39 +1019,44 @@ def create_single_gui(single_frame):
   password_label.grid(row=5, column=0, padx=10, pady=3, sticky=tk.W)
   password_entry = ttk.Entry(single_frame, show='*', width=23)
   password_entry.grid(row=5, column=1, pady=3)
+  
+  secret_label = ttk.Label(single_frame, text='Secret (if needed):')
+  secret_label.grid(row=6, column=0, padx=10, pady=3, sticky=tk.W)
+  secret_entry = ttk.Entry(single_frame, width=23)
+  secret_entry.grid(row=6, column=1, pady=3)
 
   select_transfer_label = ttk.Label(single_frame, text='Select TFTP/FTP:')
-  select_transfer_label.grid(row=6, column=0, padx=10, pady=3, sticky=tk.W)
+  select_transfer_label.grid(row=7, column=0, padx=10, pady=3, sticky=tk.W)
   select_transfer_var = tk.StringVar()
   select_transfer_dropdown = ttk.Combobox(single_frame, textvariable=select_transfer_var, values=['tftp', 'ftp'])
-  select_transfer_dropdown.grid(row=6, column=1, pady=3)
+  select_transfer_dropdown.grid(row=7, column=1, pady=3)
 
   tftp_label = ttk.Label(single_frame, text='TFTP/FTP Server IP:')
-  tftp_label.grid(row=7, column=0, padx=10, pady=3, sticky=tk.W)
+  tftp_label.grid(row=8, column=0, padx=10, pady=3, sticky=tk.W)
   tftp_entry = ttk.Entry(single_frame, width=23)
-  tftp_entry.grid(row=7, column=1, pady=3)
+  tftp_entry.grid(row=8, column=1, pady=3)
 
   add_ver = ttk.Button(single_frame, text='Add Version to existing', command=add_new_version)
-  add_ver.grid(row=8, column=0,padx=(0,295),pady=2)
+  add_ver.grid(row=9, column=0,padx=(0,295),pady=2)
 
   delete_ver = ttk.Button(single_frame, text='Delete Existing version', command=delete_version)
-  delete_ver.grid(row=9, column=0,padx=(0,298),pady=2)
+  delete_ver.grid(row=10, column=0,padx=(0,298),pady=2)
 
   add_device = ttk.Button(single_frame, text='Add Device', command=add_new_device)
-  add_device.grid(row=8, column=0, pady=2)
+  add_device.grid(row=9, column=0, pady=2)
 
   delete_device = ttk.Button(single_frame, text='Delete Device', command=delete_switch_type)
-  delete_device.grid(row=9, column=0, pady=2)
+  delete_device.grid(row=10, column=0, pady=2)
   
   delete_device = ttk.Button(single_frame, text='Show Device List', command=show_update_db_popup)
-  delete_device.grid(row=10, column=0,padx=(0,330),pady=2)
+  delete_device.grid(row=11, column=0,padx=(0,330),pady=2)
 
   # Start button execute firmware up
   start_button = ttk.Button(single_frame, text='Start SSH', command=start_ssh)
-  start_button.grid(row=11, column=0,padx=(0,350), pady=2)
+  start_button.grid(row=12, column=0,padx=(0,350), pady=2)
 
   output_frame = tk.Frame(single_frame)
-  output_frame.grid(row=12, column=0,columnspan=2, padx=10, pady=5)
+  output_frame.grid(row=13, column=0,columnspan=2, padx=10, pady=5)
 
   # Create a scrollbar for the version_text
   output_scrollbar = tk.Scrollbar(output_frame, orient="vertical")
