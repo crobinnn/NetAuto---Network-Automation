@@ -202,7 +202,7 @@ def create_bulk_gui(header,bulk_frame):
               else:
                 output = net_connect.send_command_timing('copy ' + protocol + '://' + 'compnet:C0mpn3t!@' + tftp_server + '/' + path + ' flash:', read_timeout=300)
                   
-              # confirmation prompt enter empty string biar enter
+              # confirmation prompt enter empty string biar kayak enter
               output = net_connect.send_command('\n', expect_string='Accessing ' + protocol + '://', read_timeout=100)
             
               while True:

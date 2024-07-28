@@ -68,6 +68,7 @@ def capture_config_gui(cap_header,capture_frame):
     user = cap['user']
     password = cap['password']
     protocol = cap['protocol']
+    secret = cap['secret']
     capture_log_path = capturelog_entry.get()
     
     if vendor == 'cisco' and protocol == 'telnet':
@@ -77,6 +78,7 @@ def capture_config_gui(cap_header,capture_frame):
         'username': user,
         'password': password,
         'port': 23,
+        'secret': secret
       }
     elif vendor == 'cisco' and protocol == 'ssh':
       device = {
@@ -85,6 +87,7 @@ def capture_config_gui(cap_header,capture_frame):
         'username': user,
         'password': password,
         'port': 22,
+        'secret': secret
       }
     
     def check_connection(device):
@@ -101,9 +104,17 @@ def capture_config_gui(cap_header,capture_frame):
       cap_tree.update_idletasks()
       return
     else:
-      net_connect.find_prompt()
-      cap_tree.set(item_id, '#3', "Connected")
-      cap_tree.update_idletasks()
+      isenable = net_connect.check_enable_mode()
+      if isenable == False:
+        net_connect.enable()
+        net_connect.find_prompt()
+        cap_tree.set(item_id, "#3", "Connected")
+        cap_tree.update_idletasks()
+      else:
+        net_connect.find_prompt()
+        cap_tree.set(item_id, "#3", "Connected")
+        cap_tree.update_idletasks()
+      
       net_connect.send_command('term length 0')
       
       # regular case for staging

@@ -125,9 +125,6 @@ def push_config_gui(push_header,push_frame):
         net_connect.find_prompt()
         push_tree.set(item_id, "#3", "Connected")
         push_tree.update_idletasks()
-      net_connect.find_prompt()
-      push_tree.set(item_id, '#3', "Connected")
-      push_tree.update_idletasks()
       
       if condition == 'existing':
         if bool_reload == 'yes' and minutes:

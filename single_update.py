@@ -341,6 +341,7 @@ def create_single_gui(single_frame):
         'username': username,
         'password': password,
         'port': 22,
+        'secret': secret
       }
     else:
       cisco_device = {
@@ -349,6 +350,7 @@ def create_single_gui(single_frame):
         'username': username,
         'password': password,
         'port': 22,
+        'secret': secret
       }
 
     if switch_type == 'C2960':
