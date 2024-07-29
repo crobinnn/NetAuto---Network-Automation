@@ -217,7 +217,7 @@ def create_bulk_gui(header,bulk_frame):
 
                 time.sleep(3)
 
-              output = net_connect.send_command_timing('dir flash:*.bin', delay_factor=4, max_loops=1000)
+              output = net_connect.send_command('dir flash:*.bin', read_timeout=300)
 
               # confirm apakah file udh ad di flash or not, kalau ad kita ganti system boot ke firmware yg ud dicopy
               if firmware in output:
@@ -256,7 +256,7 @@ def create_bulk_gui(header,bulk_frame):
                   output = net_connect.send_command('reload', expect_string='[confirm]', delay_factor=4, max_loops=1000, read_timeout=120)
 
                   # Confirm reload
-                  output = net_connect.send_command_timing('yes', delay_factor=4, max_loops=1000)
+                  output = net_connect.send_command('yes')
                   bulk_tree.set(item_id, "#8", "Done")
                   net_connect.disconnect()
                   bulk_tree.set(item_id, "#9", "Rebooting..")
@@ -274,7 +274,7 @@ def create_bulk_gui(header,bulk_frame):
                           reconnected = True
 
                           # Update ver
-                          shupdatever = net_connect.send_command_timing('show ver', delay_factor=4, max_loops=1000)
+                          shupdatever = net_connect.send_command('show ver', read_timeout=300)
                           firstline = shupdatever.strip().split('\n')[0]
                           version_index = firstline.find("Version")
 
@@ -539,7 +539,7 @@ def create_bulk_gui(header,bulk_frame):
 
             time.sleep(3)
 
-          output = net_connect.send_command_timing('dir flash:*.bin', delay_factor=4, max_loops=1000)
+          output = net_connect.send_command('dir flash:*.bin', read_timeout=300)
 
           # confirm apakah file udh ad di flash or not, kalau ad kita ganti system boot ke firmware yg ud dicopy
           if firmware in output:
@@ -594,7 +594,7 @@ def create_bulk_gui(header,bulk_frame):
 
         output = net_connect.send_config_set('no boot manual')
 
-        output = net_connect.send_command_timing('write memory', delay_factor=4, max_loops=1000)
+        output = net_connect.send_command('write memory', read_timeout=300)
         
         bulk_tree.set(item_id, "#8", "Upgrading..")
         bulk_tree.update_idletasks()
@@ -645,7 +645,7 @@ def create_bulk_gui(header,bulk_frame):
             time.sleep(2)
           
 
-        shupdatever = net_connect.send_command_timing('show ver', delay_factor=4, max_loops=1000)
+        shupdatever = net_connect.send_command('show ver', read_timeout=300)
         firstline = shupdatever.strip().split('\n')[1]
         version_index = firstline.find("Version")
 
