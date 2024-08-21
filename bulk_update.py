@@ -1,4 +1,3 @@
-
 import tkinter as tk
 import db_connection as db
 import csv
@@ -498,6 +497,9 @@ def create_bulk_gui(header,bulk_frame):
 
               if device_prompt in output_part:
                 break
+              
+              
+              
 
               time.sleep(3)
 
@@ -624,193 +626,203 @@ def create_bulk_gui(header,bulk_frame):
 
         reconnected = False
         while not reconnected:
-          try:
-            with ConnectHandler(**cisco_device) as net_connect:
-              # REconnect SSH
+          net_connect, error = check_connection(cisco_device)
+          if error:
+            bulk_tree.set(item_id, "#10", "Reconnecting..")
+            bulk_tree.update_idletasks()
+            reconnected = False
+            time.sleep(2)
+          else:
+            isenable = net_connect.check_enable_mode()
+            if isenable == False:
+              net_connect.enable()
               bulk_tree.set(item_id, "#9", "UP")
               bulk_tree.set(item_id, "#10", "Reconnected")
               bulk_tree.update_idletasks()
               reconnected = True
-
-          except (NetmikoTimeoutException, NetmikoAuthenticationException) as e:
-            bulk_tree.set(item_id, "#10", "Reconnecting..")
-            bulk_tree.update_idletasks()
-            reconnected = False
-            time.sleep(2)
-            
-          except Exception as e:
-            bulk_tree.set(item_id, "#10", "Reconnecting..")
-            bulk_tree.update_idletasks()
-            reconnected = False
-            time.sleep(2)
+              break
+            else:
+              bulk_tree.set(item_id, "#9", "UP")
+              bulk_tree.set(item_id, "#10", "Reconnected")
+              bulk_tree.update_idletasks()
+              reconnected = True
+              break
           
-
-        shupdatever = net_connect.send_command('show ver', read_timeout=300)
-        firstline = shupdatever.strip().split('\n')[1]
-        version_index = firstline.find("Version")
-
-        # Get version after upd
-        if version_index != -1:
-          comma_index = firstline.find(",", version_index)
-          if comma_index != -1:
-            updatever = firstline[version_index + len("Version"):comma_index]
-          else:
-            updatever = 'Not Found'
+        net_connect, error = check_connection(cisco_device)
+        if error:
+          tk.messagebox.showinfo('Error Occured', error)
+          return
         else:
-          updatever = 'Not Found'
+          isenable = net_connect.check_enable_mode()
+          if isenable == False:
+            net_connect.enable()
+          else:
+            device_prompt = net_connect.find_prompt()
             
-        bulk_tree.set(item_id, "#11", updatever)
-        bulk_tree.update_idletasks()
-
-        if updatever != currentver:
-          #config verify
-          bulk_tree.set(item_id, "#12", "Verifying..")
-          bulk_tree.update_idletasks()
-
-          updateconfig = net_connect.send_command('show run', read_timeout=300)
-          
-          updateconf_lines = updateconfig.strip().split('\n')
-          currentconf_lines = currentconfig.strip().split('\n')
-
-          confdiff = difflib.unified_diff(currentconf_lines, updateconf_lines)
-          # Check if there are differences
-          if any(confdiff):
-            added_lines =[]
-            removed_lines = []
-            # Classify lines as added (+) or removed (-)
-            for line in confdiff:
-              if line.startswith('+'):
-                added_lines.append(line[1:])  
-              elif line.startswith('-'):
-                removed_lines.append(line[1:]) 
-
-            bulk_tree.set(item_id, "#12", "Not Match")
-            bulk_tree.update_idletasks()
-
-            conf_filename = f"{switch_type}_{ip}_conf.txt"
-            with open(os.path.join(save_path, conf_filename), 'w') as f:
-              f.write("Added lines:\n")
-              for line in added_lines:
-                f.write(f"+ {line}\n")
-              
-              f.write("\nRemoved lines:\n")
-              for line in removed_lines:
-                f.write(f"- {line}\n")
-                
-          else:
-            # If no differences, display confirmation message
-            bulk_tree.set(item_id, "#12", "Match")
-            bulk_tree.update_idletasks()
-
-          bulk_tree.set(item_id, "#13", "Verifying..")
-          bulk_tree.update_idletasks()
-
-          updateint = net_connect.send_command('show ip int br', read_timeout=300)
-          updateint_lines = updateint.strip().split('\n')
-          currentint_lines = currentint.strip().split('\n')
-          
-          intdiff = difflib.unified_diff(currentint_lines, updateint_lines)
-          # Check if there are differences
-          if any(intdiff):
-            added_lines =[]
-            removed_lines = []
-            # Classify lines as added (+) or removed (-)
-            for line in intdiff:
-              if line.startswith('+'):
-                added_lines.append(line[1:])  
-              elif line.startswith('-'):
-                removed_lines.append(line[1:])  
-
-            bulk_tree.set(item_id, "#13", "Not Match")
-            bulk_tree.update_idletasks()
-
-            int_filename = f"{switch_type}_{ip}_int.txt"
-            with open(os.path.join(save_path, int_filename), 'w') as f:
-              f.write("Added lines:\n")
-              for line in added_lines:
-                f.write(f"+ {line}\n")
-              
-              f.write("\nRemoved lines:\n")
-              for line in removed_lines:
-                f.write(f"- {line}\n")      
-          else:
-            # If no differences, display confirmation message
-            bulk_tree.set(item_id, "#13", "Match")
-            bulk_tree.update_idletasks()
-              
-          bulk_tree.set(item_id, "#14", "Verifying..")
-          bulk_tree.update_idletasks()
-
-          updatevlan = net_connect.send_command('show vlan', read_timeout=300)
-          net_connect.disconnect()
-          updatevlan_lines = updatevlan.strip().split('\n')
-          currentvlan_lines = currentvlan.strip().split('\n')
-
-          vlandiff = difflib.unified_diff(updatevlan_lines, currentvlan_lines)
-
-          # Check if there are differences
-          if any(vlandiff):
-            added_lines =[]
-            removed_lines = []
-            # Classify lines as added (+) or removed (-)
-            for line in vlandiff:
-              if line.startswith('+'):
-                added_lines.append(line[1:])  
-              elif line.startswith('-'):
-                removed_lines.append(line[1:]) 
-
-            bulk_tree.set(item_id, "#14", "Not Match")
-            bulk_tree.update_idletasks()
-
-            vlan_filename = f"{switch_type}_{ip}_vlan.txt"
-            with open(os.path.join(save_path, vlan_filename), 'w') as f:
-              f.write("Added lines:\n")
-              for line in added_lines:
-                f.write(f"+ {line}\n")
-              
-              f.write("\nRemoved lines:\n")
-              for line in removed_lines:
-                f.write(f"- {line}\n")
-          else:
-            # If no differences, display confirmation message
-            bulk_tree.set(item_id, "#14", "Match")
-            bulk_tree.update_idletasks()
-          
-          
           if cleanup == 'yes':
-            output = net_connect.send_command('install remove inactive',expect_string='install_remove:')
+            output = net_connect.send_command('install remove inactive',expect_string='install_remove:',read_timeout=600)
 
             while True:
               output_part = net_connect.read_channel()
               if output_part:
-                bulk_tree.set(item_id, "#15", "Cleaning Flash..")
+                bulk_tree.set(item_id, "#11", "Cleaning Flash..")
                 bulk_tree.update_idletasks()
 
-              if '[y/n]' in output_part:
-                output += net_connect.send_command_timing("y")
+              if 'Do you want to remove the above files? [y/n]' in output_part:
+                output += net_connect.send_command_timing("y",read_timeout=600)
 
               if device_prompt in output_part:
                 break
 
               time.sleep(3)
 
-            bulk_tree.set(item_id, "#15", "Cleaned Up!")
+            bulk_tree.set(item_id, "#11", "Cleaned Up!")
             bulk_tree.update_idletasks()
 
           else:
-            bulk_tree.set(item_id, "#15", "No cleanup")
+            bulk_tree.set(item_id, "#11", "No cleanup")
             bulk_tree.update_idletasks()
-            
-          bulk_tree.set(item_id, "#15", "Done!")
-          bulk_tree.update_idletasks()
-          time.sleep(3)
-
-        else:
-          bulk_tree.set(item_id, "#11", "Not Updated")
-          bulk_tree.update_idletasks()
-          net_connect.disconnect() 
-        
           
+          shupdatever = net_connect.send_command('show ver', read_timeout=300)
+          firstline = shupdatever.strip().split('\n')[1]
+          version_index = firstline.find("Version")
+
+          # Get version after upd
+          if version_index != -1:
+            comma_index = firstline.find(",", version_index)
+            if comma_index != -1:
+              updatever = firstline[version_index + len("Version"):comma_index]
+            else:
+              updatever = 'Not Found'
+          else:
+            updatever = 'Not Found'
+              
+          bulk_tree.set(item_id, "#11", updatever)
+          bulk_tree.update_idletasks()
+
+          if updatever != currentver:
+            #config verify
+            bulk_tree.set(item_id, "#12", "Verifying..")
+            bulk_tree.update_idletasks()
+
+            updateconfig = net_connect.send_command('show run', read_timeout=300)
+            
+            updateconf_lines = updateconfig.strip().split('\n')
+            currentconf_lines = currentconfig.strip().split('\n')
+
+            confdiff = difflib.unified_diff(currentconf_lines, updateconf_lines)
+            # Check if there are differences
+            if any(confdiff):
+              added_lines =[]
+              removed_lines = []
+              # Classify lines as added (+) or removed (-)
+              for line in confdiff:
+                if line.startswith('+'):
+                  added_lines.append(line[1:])  
+                elif line.startswith('-'):
+                  removed_lines.append(line[1:]) 
+
+              bulk_tree.set(item_id, "#12", "Not Match")
+              bulk_tree.update_idletasks()
+
+              conf_filename = f"{switch_type}_{ip}_conf.txt"
+              with open(os.path.join(save_path, conf_filename), 'w') as f:
+                f.write("Added lines:\n")
+                for line in added_lines:
+                  f.write(f"+ {line}\n")
+                
+                f.write("\nRemoved lines:\n")
+                for line in removed_lines:
+                  f.write(f"- {line}\n")
+                  
+            else:
+              # If no differences, display confirmation message
+              bulk_tree.set(item_id, "#12", "Match")
+              bulk_tree.update_idletasks()
+
+            bulk_tree.set(item_id, "#13", "Verifying..")
+            bulk_tree.update_idletasks()
+
+            updateint = net_connect.send_command('show ip int br', read_timeout=300)
+            updateint_lines = updateint.strip().split('\n')
+            currentint_lines = currentint.strip().split('\n')
+            
+            intdiff = difflib.unified_diff(currentint_lines, updateint_lines)
+            # Check if there are differences
+            if any(intdiff):
+              added_lines =[]
+              removed_lines = []
+              # Classify lines as added (+) or removed (-)
+              for line in intdiff:
+                if line.startswith('+'):
+                  added_lines.append(line[1:])  
+                elif line.startswith('-'):
+                  removed_lines.append(line[1:])  
+
+              bulk_tree.set(item_id, "#13", "Not Match")
+              bulk_tree.update_idletasks()
+
+              int_filename = f"{switch_type}_{ip}_int.txt"
+              with open(os.path.join(save_path, int_filename), 'w') as f:
+                f.write("Added lines:\n")
+                for line in added_lines:
+                  f.write(f"+ {line}\n")
+                
+                f.write("\nRemoved lines:\n")
+                for line in removed_lines:
+                  f.write(f"- {line}\n")      
+            else:
+              # If no differences, display confirmation message
+              bulk_tree.set(item_id, "#13", "Match")
+              bulk_tree.update_idletasks()
+                
+            bulk_tree.set(item_id, "#14", "Verifying..")
+            bulk_tree.update_idletasks()
+
+            updatevlan = net_connect.send_command('show vlan', read_timeout=300)
+            net_connect.disconnect()
+            updatevlan_lines = updatevlan.strip().split('\n')
+            currentvlan_lines = currentvlan.strip().split('\n')
+
+            vlandiff = difflib.unified_diff(updatevlan_lines, currentvlan_lines)
+
+            # Check if there are differences
+            if any(vlandiff):
+              added_lines =[]
+              removed_lines = []
+              # Classify lines as added (+) or removed (-)
+              for line in vlandiff:
+                if line.startswith('+'):
+                  added_lines.append(line[1:])  
+                elif line.startswith('-'):
+                  removed_lines.append(line[1:]) 
+
+              bulk_tree.set(item_id, "#14", "Not Match")
+              bulk_tree.update_idletasks()
+
+              vlan_filename = f"{switch_type}_{ip}_vlan.txt"
+              with open(os.path.join(save_path, vlan_filename), 'w') as f:
+                f.write("Added lines:\n")
+                for line in added_lines:
+                  f.write(f"+ {line}\n")
+                
+                f.write("\nRemoved lines:\n")
+                for line in removed_lines:
+                  f.write(f"- {line}\n")
+            else:
+              # If no differences, display confirmation message
+              bulk_tree.set(item_id, "#14", "Match")
+              bulk_tree.update_idletasks()
+              
+            bulk_tree.set(item_id, "#15", "Done!")
+            bulk_tree.update_idletasks()
+            time.sleep(3)
+
+          else:
+            bulk_tree.set(item_id, "#11", "Not Updated")
+            bulk_tree.update_idletasks()
+            net_connect.disconnect() 
+              
   style = ttk.Style()
   style.layout("Treeview",[('Treeview.treearea', {'sticky': 'nswe'})]) 
   style.layout("Custom.Treeview.Heading", style.layout("Treeview.Heading"))
