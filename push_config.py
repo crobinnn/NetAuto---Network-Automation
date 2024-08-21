@@ -168,8 +168,14 @@ def push_config_gui(push_header,push_frame):
           push_tree.update_idletasks()
           
         except Exception as e:
-          tk.messagebox.showinfo('Process No. ' + str(number), "Fail Backing Up")
           push_tree.set(item_id, '#6', 'Backup Failed')
+          push_tree.update_idletasks()
+          push_tree.set(item_id, "#6", "Cancel Reload")
+          push_tree.update_idletasks()
+          net_connect.send_command('reload cancel')
+          time.sleep(1)
+          tk.messagebox.showinfo('Process No. ' + str(number), "Fail Backing Up")
+          push_tree.set(item_id, "#6", "Failed,Try Again")
           push_tree.update_idletasks()
         
         push_tree.set(item_id, "#7", "Copying..")
@@ -184,6 +190,12 @@ def push_config_gui(push_header,push_frame):
           push_tree.update_idletasks()
         elif file not in output:
           push_tree.set(item_id, "#7", "Copy Fail")
+          push_tree.update_idletasks()
+          push_tree.set(item_id, "#7", "Cancel Reload")
+          push_tree.update_idletasks()
+          net_connect.send_command('reload cancel')
+          time.sleep(1)
+          push_tree.set(item_id, "#7", "Failed,Try Again")
           push_tree.update_idletasks()
           return
         
@@ -207,8 +219,8 @@ def push_config_gui(push_header,push_frame):
           
           push_tree.set(item_id, "#8", "Write memory...")
           push_tree.update_idletasks()
-          net_connect.send_command('wr mem')
-          time.sleep(1)
+          net_connect.send_command_timing('wr mem',read_timeout=300)
+          time.sleep(2)
           
           if bool_reload == 'yes':
             push_tree.set(item_id, "#8", "Invalid cmd, cancel reload..")
@@ -227,8 +239,8 @@ def push_config_gui(push_header,push_frame):
           net_connect.send_command('\n')
           push_tree.set(item_id, "#8", "Write memory...")
           push_tree.update_idletasks()
-          net_connect.send_command('wr mem')
-          time.sleep(1)
+          net_connect.send_command_timing('wr mem',read_timeout=300)
+          time.sleep(2)
           
           if bool_reload == 'yes':
             push_tree.set(item_id, "#8", "Success, cancel reload..")
@@ -279,11 +291,11 @@ def push_config_gui(push_header,push_frame):
           push_tree.set(item_id, "#10", "Capturing...")
           push_tree.update_idletasks()
             
-          hostname = net_connect.send_command('sh run | include hostname').split()[1]
+          hostname = net_connect.send_command('sh run | include hostname',read_timeout=300).split()[1]
           date_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
           logfilename = f'{hostname}_{date_time}.txt'
           net_connect.send_command('term length 0')
-          hostname = net_connect.send_command('sh run | include hostname').split()[1]
+          # hostname = net_connect.send_command('sh run | include hostname').split()[1]
               
           output = ''
           for cmd in command_list:
@@ -368,6 +380,12 @@ def push_config_gui(push_header,push_frame):
         else:
           push_tree.set(item_id, "#7", "Copy Fail")
           push_tree.update_idletasks()
+          push_tree.set(item_id, "#7", "Cancel Reload")
+          push_tree.update_idletasks()
+          net_connect.send_command('reload cancel')
+          time.sleep(1)
+          push_tree.set(item_id, "#7", "Failed,Try Again")
+          push_tree.update_idletasks()
           return
         
         output = net_connect.send_command_timing('copy flash:' + file + ' running-config',read_timeout=300)
@@ -390,8 +408,9 @@ def push_config_gui(push_header,push_frame):
           
           push_tree.set(item_id, "#8", "Write memory...")
           push_tree.update_idletasks()
-          net_connect.send_command('wr mem')
-          time.sleep(1)
+          net_connect.send_command_timing('wr mem',read_timeout=300)
+          time.sleep(2)
+          
           if bool_reload == 'yes':
             push_tree.set(item_id, "#8", "Invalid cmd, cancel reload..")
             push_tree.update_idletasks()
@@ -409,8 +428,8 @@ def push_config_gui(push_header,push_frame):
           net_connect.send_command('\n')
           push_tree.set(item_id, "#8", "Write memory...")
           push_tree.update_idletasks()
-          net_connect.send_command('wr mem')
-          time.sleep(1)
+          net_connect.send_command_timing('wr mem',read_timeout=300)
+          time.sleep(2)
           
           if bool_reload == 'yes':
             push_tree.set(item_id, "#8", "Success, cancel reload..")
@@ -464,11 +483,11 @@ def push_config_gui(push_header,push_frame):
           push_tree.set(item_id, "#10", "Capturing...")
           push_tree.update_idletasks()
             
-          hostname = net_connect.send_command('sh run | include hostname').split()[1]
+          hostname = net_connect.send_command('sh run | include hostname', read_timeout=300).split()[1]
           date_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
           logfilename = f'{hostname}_{date_time}.txt'
           net_connect.send_command('term length 0')
-          hostname = net_connect.send_command('sh run | include hostname').split()[1]
+          # hostname = net_connect.send_command('sh run | include hostname').split()[1]
               
           output = ''
           for cmd in command_list:
